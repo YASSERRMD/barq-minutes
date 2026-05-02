@@ -1,7 +1,7 @@
 {
   "name": "barq-minutes",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,9 +16,11 @@
     "html-to-image": "^1.11.13",
     "idb-keyval": "^6.2.2",
     "jspdf": "^4.2.1",
+    "lucide-react": "^1.14.0",
     "onnxruntime-web": "^1.26.0-dev.20260416-b7804b056c",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-router-dom": "^7.14.2",
     "vite": "^6.2.0",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.6.0",
