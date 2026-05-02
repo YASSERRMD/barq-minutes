@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mic, MicOff, Square } from 'lucide-react';
+import ProgressTimeline, { type ProgressStep } from '../components/ProgressTimeline';
 import Waveform from '../components/Waveform';
 import { extractActionItems } from '../pipeline/extractActionItems';
 import { extractDecisions } from '../pipeline/extractDecisions';
@@ -34,6 +35,12 @@ export default function Recording() {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [partialText, setPartialText] = useState('');
   const [status, setStatus] = useState('Ready to record');
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([
+    { id: 'transcribe', label: 'Transcribing audio', detail: 'Waiting for recording', status: 'pending', progress: 0 },
+    { id: 'extract', label: 'Extracting structured items', detail: 'Waiting for chunks', status: 'pending' },
+    { id: 'dedupe', label: 'Deduplicating', detail: 'Waiting for extracted items', status: 'pending' },
+    { id: 'summary', label: 'Generating summary', detail: 'Waiting for dedupe', status: 'pending' },
+  ]);
 
   useEffect(() => {
     if (state !== 'recording') return;
@@ -92,11 +99,20 @@ export default function Recording() {
     const duration = Math.max(1, Math.floor((endedAt - startedAtRef.current) / 1000));
 
     setStatus('Transcribing audio locally');
+    setProgressSteps([
+      { id: 'transcribe', label: 'Transcribing audio', detail: 'Loading ASR model and decoding audio', status: 'active', progress: 5 },
+      { id: 'extract', label: 'Extracting structured items', detail: 'Waiting for chunks', status: 'pending' },
+      { id: 'dedupe', label: 'Deduplicating', detail: 'Waiting for extracted items', status: 'pending' },
+      { id: 'summary', label: 'Generating summary', detail: 'Waiting for dedupe', status: 'pending' },
+    ]);
     const transcript = await transcribeAudioBlob(blob, {
       meetingTitle: title,
       fallbackText: partialText,
       onProgress: (event) => setStatus(event.message),
     });
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'transcribe' ? { ...step, status: 'done', detail: 'Transcript ready', progress: 100 } : step
+    )));
 
     const windows = chunkTranscriptForExtraction(transcript);
     const totalChunks = windows.length;
@@ -106,6 +122,11 @@ export default function Recording() {
 
     for (const window of windows) {
       setStatus(`Extracting structured items ${window.index + 1}/${totalChunks}`);
+      setProgressSteps((steps) => steps.map((step) => (
+        step.id === 'extract'
+          ? { ...step, status: 'active', detail: `${window.index + 1}/${totalChunks} chunks`, progress: ((window.index + 1) / Math.max(1, totalChunks)) * 100 }
+          : step
+      )));
       const [d, a, q] = await Promise.all([
         extractDecisions(window, totalChunks),
         extractActionItems(window, totalChunks),
@@ -115,12 +136,27 @@ export default function Recording() {
       actionItems.push(...a);
       openQuestions.push(...q);
     }
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'extract' ? { ...step, status: 'done', detail: `${totalChunks}/${totalChunks} chunks`, progress: 100 } : step
+    )));
 
     setStatus('Deduplicating structured items');
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'dedupe' ? { ...step, status: 'active', detail: 'Clustering duplicate items', progress: null } : step
+    )));
     const deduped = await dedupeStructuredItems({ decisions, actionItems, openQuestions });
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'dedupe' ? { ...step, status: 'done', detail: 'Done', progress: 100 } : step
+    )));
 
     setStatus('Generating summary');
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'summary' ? { ...step, status: 'active', detail: 'Creating 5 executive bullets', progress: null } : step
+    )));
     const summary = await generateFinalSummary({ transcript, ...deduped });
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'summary' ? { ...step, status: 'done', detail: 'Done', progress: 100 } : step
+    )));
 
     const audioBlobKey = storeAudio ? await saveAudioBlob(id, blob) : null;
     const meeting = await saveMeeting({
@@ -211,6 +247,7 @@ export default function Recording() {
             disabled={state === 'processing'}
           />
           <p className="status-line">{status}</p>
+          <ProgressTimeline steps={progressSteps} />
         </aside>
       </div>
     </section>
