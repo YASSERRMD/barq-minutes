@@ -26,8 +26,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function isWebGpuCreationRace(error: unknown) {
-  return String(error).includes('another WebGPU EP inference session is being created');
+function isOrtSessionCreationRace(error: unknown) {
+  const message = String(error);
+  return message.includes('another WebGPU EP inference session is being created')
+    || message.includes("multiple calls to 'initWasm()' detected")
+    || message.includes('no available backend found');
 }
 
 function modelBaseUrl() {
@@ -68,8 +71,8 @@ async function loadSession(
   try {
     return await ort.InferenceSession.create(onnxPath, options);
   } catch (error) {
-    if (provider !== 'webgpu' || !isWebGpuCreationRace(error)) throw error;
-    report(onProgress, `Waiting for WebGPU session slot for ${graphName}`, null);
+    if (!isOrtSessionCreationRace(error)) throw error;
+    report(onProgress, `Waiting for ONNX Runtime session slot for ${graphName}`, null);
     await sleep(750);
     return ort.InferenceSession.create(onnxPath, options);
   }

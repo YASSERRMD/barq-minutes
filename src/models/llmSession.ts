@@ -38,8 +38,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function isWebGpuCreationRace(error: unknown) {
-  return String(error).includes('another WebGPU EP inference session is being created');
+function isOrtSessionCreationRace(error: unknown) {
+  const message = String(error);
+  return message.includes('another WebGPU EP inference session is being created')
+    || message.includes("multiple calls to 'initWasm()' detected")
+    || message.includes('no available backend found');
 }
 
 env.allowLocalModels = false;
@@ -108,8 +111,8 @@ export async function loadLlmSession(
         try {
           model = await AutoModelForCausalLM.from_pretrained(MODEL_IDS.llm, modelOptions);
         } catch (error) {
-          if (!isWebGpuCreationRace(error)) throw error;
-          report(onProgress, 'Waiting for WebGPU session slot for glm5.1-distill', null);
+          if (!isOrtSessionCreationRace(error)) throw error;
+          report(onProgress, 'Waiting for ONNX Runtime session slot for glm5.1-distill', null);
           await sleep(750);
           model = await AutoModelForCausalLM.from_pretrained(MODEL_IDS.llm, modelOptions);
         }

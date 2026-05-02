@@ -77,28 +77,8 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
     setState({
       llm: { ...idle('llm'), status: 'loading', message: 'Waiting for ASR WebGPU setup' },
       asr: { ...idle('asr'), status: 'loading', message: 'Initializing...' },
-      embeddings: { ...idle('embeddings'), status: 'loading', message: 'Initializing...' },
+      embeddings: { ...idle('embeddings'), status: 'loading', message: 'Waiting for core model setup' },
     });
-
-    const embeddingTask = loadEmbeddingSession(setModelProgress('embeddings'))
-      .then((session) => {
-        setEmbeddingSession(session);
-        setState((prev) => ({
-          ...prev,
-          embeddings: { ...prev.embeddings, session, status: 'ready', progress: 100 },
-        }));
-      })
-      .catch((err) => {
-        setState((prev) => ({
-          ...prev,
-          embeddings: {
-            ...prev.embeddings,
-            status: 'error',
-            message: err instanceof Error ? err.message : String(err),
-            progress: null,
-          },
-        }));
-      });
 
     await loadAsrSession(setModelProgress('asr'))
       .then((session) => {
@@ -146,7 +126,32 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
         }));
       });
 
-    await embeddingTask;
+    setState((prev) => ({
+      ...prev,
+      embeddings: prev.embeddings.status === 'loading'
+        ? { ...prev.embeddings, message: 'Starting MiniLM embedding setup' }
+        : prev.embeddings,
+    }));
+
+    await loadEmbeddingSession(setModelProgress('embeddings'))
+      .then((session) => {
+        setEmbeddingSession(session);
+        setState((prev) => ({
+          ...prev,
+          embeddings: { ...prev.embeddings, session, status: 'ready', progress: 100 },
+        }));
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          embeddings: {
+            ...prev.embeddings,
+            status: 'error',
+            message: err instanceof Error ? err.message : String(err),
+            progress: null,
+          },
+        }));
+      });
   }, [setModelProgress]);
 
   const retry = useCallback(() => {
