@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Calendar, Clock } from 'lucide-react';
 import AskBox from '../components/AskBox';
+import ExportButtons from '../components/ExportButtons';
 import TranscriptViewer from '../components/TranscriptViewer';
 import type { Meeting as MeetingRecord } from '../schemas/meeting';
 import { getMeeting } from '../storage/meetings';
@@ -72,6 +73,7 @@ export default function Meeting() {
             </span>
           </div>
         </div>
+        <ExportButtons meeting={meeting} />
       </header>
 
       <div className="detail-grid">

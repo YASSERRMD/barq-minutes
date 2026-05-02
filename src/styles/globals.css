@@ -545,6 +545,13 @@ button {
   line-height: 1.5;
 }
 
+.export-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 @media (max-width: 980px) {
   .record-layout {
     grid-template-columns: 1fr;
