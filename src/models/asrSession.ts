@@ -46,35 +46,111 @@ function report(onProgress: AsrProgress | undefined, message: string, progress: 
   });
 }
 
+async function fetchBinaryWithProgress(
+  url: string,
+  label: string,
+  progressStart: number,
+  progressEnd: number,
+  onProgress?: AsrProgress,
+): Promise<Uint8Array> {
+  report(onProgress, `Downloading ${label}`, progressStart);
+  const response = await fetch(url, { credentials: 'omit' });
+  if (!response.ok) {
+    throw new Error(`Failed to download ${label}: ${response.status}`);
+  }
+
+  const total = Number(response.headers.get('content-length') ?? 0);
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const buffer = await response.arrayBuffer();
+    report(onProgress, `Downloaded ${label}`, progressEnd);
+    return new Uint8Array(buffer);
+  }
+
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(value);
+    loaded += value.byteLength;
+
+    if (total > 0) {
+      const fileProgress = loaded / total;
+      const progress = progressStart + (progressEnd - progressStart) * fileProgress;
+      const loadedMb = (loaded / 1024 / 1024).toFixed(1);
+      const totalMb = (total / 1024 / 1024).toFixed(1);
+      report(onProgress, `Downloading ${label} (${loadedMb}/${totalMb} MB)`, progress);
+    } else {
+      const loadedMb = (loaded / 1024 / 1024).toFixed(1);
+      report(onProgress, `Downloading ${label} (${loadedMb} MB)`, null);
+    }
+  }
+
+  const data = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    data.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  report(onProgress, `Downloaded ${label}`, progressEnd);
+  return data;
+}
+
 async function loadSession(
   baseUrl: string,
   name: string,
   provider: 'webgpu' | 'wasm',
+  progressStart: number,
+  progressEnd: number,
   onProgress?: AsrProgress,
 ) {
   const graphName = `${name}_${MODEL_DTYPES.asr}`;
   const onnxPath = `${baseUrl}/onnx/${graphName}.onnx`;
-  report(onProgress, `Loading ${graphName}.onnx`, null);
+  const dataPath = `${baseUrl}/onnx/${graphName}.onnx_data`;
+  const midProgress = progressStart + (progressEnd - progressStart) * 0.25;
+  const dataProgress = progressStart + (progressEnd - progressStart) * 0.85;
 
-  const externalData = [
-    {
-      path: `${graphName}.onnx_data`,
-      data: `${baseUrl}/onnx/${graphName}.onnx_data`,
-    },
-  ];
+  const onnxBytes = await fetchBinaryWithProgress(
+    onnxPath,
+    `${graphName}.onnx`,
+    progressStart,
+    midProgress,
+    onProgress,
+  );
+  const externalBytes = await fetchBinaryWithProgress(
+    dataPath,
+    `${graphName}.onnx_data`,
+    midProgress,
+    dataProgress,
+    onProgress,
+  );
 
   const options: ort.InferenceSession.SessionOptions = {
     executionProviders: provider === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'],
-    externalData,
+    externalData: [
+      {
+        path: `${graphName}.onnx_data`,
+        data: externalBytes,
+      },
+    ],
   };
 
+  report(onProgress, `Creating ${graphName} session on ${provider}`, dataProgress);
   try {
-    return await ort.InferenceSession.create(onnxPath, options);
+    const session = await ort.InferenceSession.create(onnxBytes, options);
+    report(onProgress, `${graphName} session ready`, progressEnd);
+    return session;
   } catch (error) {
     if (!isOrtSessionCreationRace(error)) throw error;
     report(onProgress, `Waiting for ONNX Runtime session slot for ${graphName}`, null);
     await sleep(750);
-    return ort.InferenceSession.create(onnxPath, options);
+    const session = await ort.InferenceSession.create(onnxBytes, options);
+    report(onProgress, `${graphName} session ready`, progressEnd);
+    return session;
   }
 }
 
@@ -120,21 +196,21 @@ export async function loadAsrSession(onProgress?: AsrProgress): Promise<AsrSessi
       report(onProgress, 'Loading LFM2.5-Audio tokenizer', 0);
       const tokenizer = await AutoTokenizer.from_pretrained(MODEL_IDS.asr);
 
-      report(onProgress, `Loading LFM2.5-Audio decoder on ${backend}`, 20);
-      const decoder = await loadSession(baseUrl, 'decoder', backend, onProgress);
-
-      report(onProgress, `Loading LFM2.5-Audio audio encoder on ${backend}`, 50);
-      const audioEncoder = await loadSession(baseUrl, 'audio_encoder', backend, onProgress);
-
-      const embed = await loadEmbedTokens(baseUrl, onProgress);
-
-      report(onProgress, 'Loading LFM2.5-Audio config', 80);
+      report(onProgress, 'Loading LFM2.5-Audio config', 5);
       const configResponse = await fetch(`${baseUrl}/config.json`, { credentials: 'omit' });
       if (!configResponse.ok) {
         throw new Error(`Failed to load config.json: ${configResponse.status}`);
       }
       const config = await configResponse.json();
       const lfmConfig = config.lfm || {};
+
+      report(onProgress, `Loading LFM2.5-Audio audio encoder on ${backend}`, 10);
+      const audioEncoder = await loadSession(baseUrl, 'audio_encoder', backend, 10, 35, onProgress);
+
+      const embed = await loadEmbedTokens(baseUrl, onProgress);
+
+      report(onProgress, `Loading LFM2.5-Audio decoder on ${backend}`, 75);
+      const decoder = await loadSession(baseUrl, 'decoder', backend, 75, 98, onProgress);
 
       onProgress?.({
         status: 'ready',
