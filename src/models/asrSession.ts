@@ -5,13 +5,19 @@ import { MODEL_DTYPES, MODEL_IDS, type ModelLoadProgress } from './modelConfig';
 type AsrProgress = (progress: ModelLoadProgress) => void;
 
 export type AsrSession = {
-  tokenizer: unknown;
+  tokenizer: any;
   decoder: ort.InferenceSession;
   audioEncoder: ort.InferenceSession;
   embedTokens: Float32Array;
   embedShape: { vocabSize: number; hiddenSize: number };
   modelBaseUrl: string;
   backend: 'webgpu' | 'wasm';
+  layerTypes: string[];
+  hiddenSize: number;
+  numKVHeads: number;
+  headDim: number;
+  convL: number;
+  vocabSize: number;
 };
 
 let asrPromise: Promise<AsrSession> | null = null;
@@ -102,6 +108,14 @@ export async function loadAsrSession(onProgress?: AsrProgress): Promise<AsrSessi
 
       const embed = await loadEmbedTokens(baseUrl, onProgress);
 
+      report(onProgress, 'Loading LFM2.5-Audio config', 80);
+      const configResponse = await fetch(`${baseUrl}/config.json`, { credentials: 'omit' });
+      if (!configResponse.ok) {
+        throw new Error(`Failed to load config.json: ${configResponse.status}`);
+      }
+      const config = await configResponse.json();
+      const lfmConfig = config.lfm || {};
+
       onProgress?.({
         status: 'ready',
         model: 'asr',
@@ -117,6 +131,12 @@ export async function loadAsrSession(onProgress?: AsrProgress): Promise<AsrSessi
         embedShape: embed.shape,
         modelBaseUrl: baseUrl,
         backend,
+        layerTypes: lfmConfig.layer_types || [],
+        hiddenSize: lfmConfig.hidden_size || 2048,
+        numKVHeads: lfmConfig.num_key_value_heads || 8,
+        headDim: Math.floor((lfmConfig.hidden_size || 2048) / (lfmConfig.num_attention_heads || 32)),
+        convL: lfmConfig.conv_L_cache || 3,
+        vocabSize: lfmConfig.vocab_size || 65536,
       };
     } catch (error) {
       asrPromise = null;

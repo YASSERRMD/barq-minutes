@@ -14,7 +14,7 @@ import type { ModelLoadProgress } from '../models/modelConfig';
 export type ModelKey = 'llm' | 'asr' | 'embeddings';
 
 export type ModelState = ModelLoadProgress & {
-  /** Resolved session handle — null until the model is ready. */
+  /** Resolved session handle. Null until the model is ready. */
   session: LlmSession | AsrSession | EmbeddingSession | null;
 };
 
@@ -37,7 +37,7 @@ type ModelBootContextValue = {
 const idle = (model: ModelKey): ModelState => ({
   status: 'idle',
   model,
-  message: 'Waiting…',
+  message: 'Waiting...',
   progress: 0,
   session: null,
 });

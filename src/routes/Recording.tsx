@@ -108,7 +108,7 @@ export default function Recording() {
       { id: 'summary', label: 'Generating summary', detail: 'Waiting for dedupe', status: 'pending' },
     ]);
     if (!asrSession) {
-      console.error('[Recording] asrSession is null — boot gate should have prevented this');
+      console.error('[Recording] asrSession is null. Boot gate should have prevented this');
       return;
     }
     const transcript = await transcribeAudioBlob(blob, asrSession, {

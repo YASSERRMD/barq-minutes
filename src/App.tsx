@@ -11,7 +11,7 @@ function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? 'nav-link active' : 'nav-link';
 }
 
-/** Inner shell — only rendered once the boot gate passes. */
+/** Inner shell only renders once the boot gate passes. */
 function AppShell() {
   const { allReady } = useModelBoot();
 

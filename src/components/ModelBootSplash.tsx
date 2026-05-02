@@ -48,7 +48,7 @@ export default function ModelBootSplash() {
 
         <p className="boot-headline">Loading AI models locally</p>
         <p className="boot-sub">
-          All processing happens in your browser — no data leaves your device.
+          All processing happens in your browser. No data leaves your device.
           Large models are cached after first download.
         </p>
 
