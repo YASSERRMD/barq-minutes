@@ -34,6 +34,14 @@ export type LlmSession = {
 
 let sessionPromise: Promise<LlmSession> | null = null;
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isWebGpuCreationRace(error: unknown) {
+  return String(error).includes('another WebGPU EP inference session is being created');
+}
+
 env.allowLocalModels = false;
 if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
@@ -88,7 +96,7 @@ export async function loadLlmSession(
       report(onProgress, 'Loading glm5.1-distill Q4 model on WebGPU', 20);
       let model: any;
       try {
-        model = await AutoModelForCausalLM.from_pretrained(MODEL_IDS.llm, {
+        const modelOptions = {
           device: 'webgpu',
           dtype: MODEL_DTYPES.llm,
           progress_callback: (event: any) => {
@@ -96,7 +104,15 @@ export async function loadLlmSession(
               report(onProgress, `Downloading ${event.file ?? 'model weights'}`, event.progress ?? null);
             }
           },
-        });
+        } as const;
+        try {
+          model = await AutoModelForCausalLM.from_pretrained(MODEL_IDS.llm, modelOptions);
+        } catch (error) {
+          if (!isWebGpuCreationRace(error)) throw error;
+          report(onProgress, 'Waiting for WebGPU session slot for glm5.1-distill', null);
+          await sleep(750);
+          model = await AutoModelForCausalLM.from_pretrained(MODEL_IDS.llm, modelOptions);
+        }
       } catch (webgpuError) {
         report(onProgress, 'WebGPU load failed, using WASM fallback', 45);
         console.warn('[llmSession] WebGPU load failed, falling back to WASM', webgpuError);

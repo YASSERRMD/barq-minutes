@@ -18,7 +18,10 @@ import { estimateTokens } from '../utils/tokens';
 import { ulid } from '../utils/ulid';
 import { useModelBoot } from '../context/ModelBootContext';
 
-type RecordingState = 'idle' | 'recording' | 'processing';
+type RecordingState = 'idle' | 'recording' | 'stopping' | 'processing';
+
+const LIVE_TRANSCRIPTION_INTERVAL_MS = 10_000;
+const MIN_LIVE_TRANSCRIPTION_BYTES = 16_000;
 
 export default function Recording() {
   const navigate = useNavigate();
@@ -28,6 +31,11 @@ export default function Recording() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const startedAtRef = useRef<number>(0);
+  const liveTimerRef = useRef<number | null>(null);
+  const liveTranscribingRef = useRef(false);
+  const liveTranscriptionPromiseRef = useRef<Promise<void> | null>(null);
+  const lastLiveBlobSizeRef = useRef(0);
+  const partialTextRef = useRef('');
 
   const [state, setState] = useState<RecordingState>('idle');
   const [title, setTitle] = useState('Untitled meeting');
@@ -52,9 +60,63 @@ export default function Recording() {
     return () => window.clearInterval(timer);
   }, [state]);
 
+  useEffect(() => {
+    partialTextRef.current = partialText;
+  }, [partialText]);
+
+  useEffect(() => {
+    return () => {
+      if (liveTimerRef.current !== null) {
+        window.clearInterval(liveTimerRef.current);
+      }
+    };
+  }, []);
+
   const tokenEstimate = useMemo(() => estimateTokens(partialText), [partialText]);
 
+  async function runLiveTranscription(finalPass = false) {
+    if (!asrSession || !recorderRef.current) return;
+    if (liveTranscribingRef.current) return;
+
+    const blob = new Blob(chunksRef.current, { type: recorderRef.current.mimeType || 'audio/webm' });
+    if (!finalPass && blob.size < MIN_LIVE_TRANSCRIPTION_BYTES) return;
+    if (!finalPass && blob.size === lastLiveBlobSizeRef.current) return;
+
+    liveTranscribingRef.current = true;
+    lastLiveBlobSizeRef.current = blob.size;
+    setStatus(finalPass ? 'Finalizing live transcript' : 'Live transcription running');
+
+    const promise = transcribeAudioBlob(blob, asrSession, {
+      meetingTitle: title,
+      fallbackText: partialTextRef.current,
+      onProgress: finalPass ? (event) => setStatus(event.message) : undefined,
+    })
+      .then((turns) => {
+        const nextText = turns.map((turn) => turn.text).join('\n').trim();
+        if (nextText) {
+          partialTextRef.current = nextText;
+          setPartialText(nextText);
+        }
+        setStatus(finalPass ? 'Transcript ready' : 'Recording audio locally. Live transcript updated');
+      })
+      .catch((error) => {
+        console.warn('[Recording] Live transcription failed', error);
+        setStatus(finalPass ? 'Final transcription failed' : 'Recording audio locally. Live transcript will retry');
+      })
+      .finally(() => {
+        liveTranscribingRef.current = false;
+        liveTranscriptionPromiseRef.current = null;
+      });
+
+    liveTranscriptionPromiseRef.current = promise;
+    await promise;
+  }
+
   async function startRecording() {
+    if (!asrSession) {
+      setStatus('ASR model is still loading');
+      return;
+    }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(stream);
@@ -75,16 +137,32 @@ export default function Recording() {
     startedAtRef.current = Date.now();
     setDurationSec(0);
     setAnalyser(nextAnalyser);
+    setPartialText('');
+    partialTextRef.current = '';
+    lastLiveBlobSizeRef.current = 0;
     setState('recording');
-    setStatus('Recording audio locally');
+    setStatus('Recording audio locally. Live transcription will update every few seconds');
+    liveTimerRef.current = window.setInterval(() => {
+      void runLiveTranscription(false);
+    }, LIVE_TRANSCRIPTION_INTERVAL_MS);
   }
 
   async function stopRecording() {
     const recorder = recorderRef.current;
-    if (!recorder) return;
+    if (!recorder || state !== 'recording') return;
 
-    setState('processing');
-    setStatus('Stopping recorder');
+    setState('stopping');
+    setStatus('Recording stopped. Finalizing transcript');
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'transcribe'
+        ? { ...step, status: 'active', detail: 'Stopping recorder and finalizing live transcript', progress: 10 }
+        : step
+    )));
+
+    if (liveTimerRef.current !== null) {
+      window.clearInterval(liveTimerRef.current);
+      liveTimerRef.current = null;
+    }
 
     const stopped = new Promise<void>((resolve) => {
       recorder.onstop = () => resolve();
@@ -94,6 +172,13 @@ export default function Recording() {
 
     streamRef.current?.getTracks().forEach((track) => track.stop());
     await audioContextRef.current?.close();
+    setAnalyser(null);
+    setMuted(false);
+    setState('processing');
+
+    if (liveTranscriptionPromiseRef.current) {
+      await liveTranscriptionPromiseRef.current;
+    }
 
     const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
     const id = ulid();
@@ -113,9 +198,14 @@ export default function Recording() {
     }
     const transcript = await transcribeAudioBlob(blob, asrSession, {
       meetingTitle: title,
-      fallbackText: partialText,
+      fallbackText: partialTextRef.current,
       onProgress: (event) => setStatus(event.message),
     });
+    const finalTranscriptText = transcript.map((turn) => turn.text).join('\n').trim();
+    if (finalTranscriptText) {
+      partialTextRef.current = finalTranscriptText;
+      setPartialText(finalTranscriptText);
+    }
     setProgressSteps((steps) => steps.map((step) => (
       step.id === 'transcribe' ? { ...step, status: 'done', detail: 'Transcript ready', progress: 100 } : step
     )));
@@ -210,7 +300,7 @@ export default function Recording() {
         <section className="panel record-main">
           <label>
             <span className="field-label">Meeting title</span>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} disabled={state === 'processing'} />
+            <input value={title} onChange={(event) => setTitle(event.target.value)} disabled={state !== 'idle'} />
           </label>
 
           <Waveform analyser={analyser} />
@@ -221,23 +311,28 @@ export default function Recording() {
                 <Mic size={18} />
                 Record
               </button>
-            ) : (
+            ) : state === 'recording' ? (
               <>
                 <button className="icon-button" type="button" onClick={toggleMute} aria-label={muted ? 'Unmute mic' : 'Mute mic'}>
                   {muted ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
-                <button className="button danger" type="button" onClick={stopRecording} disabled={state === 'processing'}>
+                <button className="button danger" type="button" onClick={stopRecording}>
                   <Square size={16} />
                   Stop
                 </button>
               </>
+            ) : (
+              <button className="button danger" type="button" disabled>
+                <Square size={16} />
+                {state === 'stopping' ? 'Stopping' : 'Processing'}
+              </button>
             )}
             <label className="toggle-row">
               <input
                 type="checkbox"
                 checked={storeAudio}
                 onChange={(event) => setStoreAudio(event.target.checked)}
-                disabled={state === 'processing'}
+                disabled={state !== 'idle'}
               />
               Store audio blob
             </label>
@@ -249,8 +344,8 @@ export default function Recording() {
           <textarea
             value={partialText}
             onChange={(event) => setPartialText(event.target.value)}
-            placeholder="Partial transcript appears here. You can type corrections while recording."
-            disabled={state === 'processing'}
+            placeholder="Live transcript appears here while recording. You can type corrections before stopping."
+            disabled={state !== 'recording'}
           />
           <p className="status-line">{status}</p>
           <ProgressTimeline steps={progressSteps} />

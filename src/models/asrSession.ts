@@ -22,6 +22,14 @@ export type AsrSession = {
 
 let asrPromise: Promise<AsrSession> | null = null;
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isWebGpuCreationRace(error: unknown) {
+  return String(error).includes('another WebGPU EP inference session is being created');
+}
+
 function modelBaseUrl() {
   return `https://huggingface.co/${MODEL_IDS.asr}/resolve/main`;
 }
@@ -52,10 +60,19 @@ async function loadSession(
     },
   ];
 
-  return ort.InferenceSession.create(onnxPath, {
+  const options: ort.InferenceSession.SessionOptions = {
     executionProviders: provider === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'],
     externalData,
-  });
+  };
+
+  try {
+    return await ort.InferenceSession.create(onnxPath, options);
+  } catch (error) {
+    if (provider !== 'webgpu' || !isWebGpuCreationRace(error)) throw error;
+    report(onProgress, `Waiting for WebGPU session slot for ${graphName}`, null);
+    await sleep(750);
+    return ort.InferenceSession.create(onnxPath, options);
+  }
 }
 
 async function loadEmbedTokens(baseUrl: string, onProgress?: AsrProgress) {
