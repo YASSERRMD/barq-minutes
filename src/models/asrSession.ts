@@ -155,30 +155,37 @@ async function loadSession(
 }
 
 async function loadEmbedTokens(baseUrl: string, onProgress?: AsrProgress) {
-  report(onProgress, 'Loading ASR text embeddings', 70);
-  const [metaResponse, binResponse] = await Promise.all([
-    fetch(`${baseUrl}/onnx/embed_tokens.json`, { credentials: 'omit' }),
-    fetch(`${baseUrl}/onnx/embed_tokens.bin`, { credentials: 'omit' }),
-  ]);
+  report(onProgress, 'Loading ASR text embedding metadata', 35);
+  const metaResponse = await fetch(`${baseUrl}/onnx/embed_tokens.json`, { credentials: 'omit' });
 
   if (!metaResponse.ok) {
     throw new Error(`Failed to load embed_tokens.json: ${metaResponse.status}`);
   }
-  if (!binResponse.ok) {
-    throw new Error(`Failed to load embed_tokens.bin: ${binResponse.status}`);
-  }
 
   const meta = await metaResponse.json();
-  const buffer = await binResponse.arrayBuffer();
+  const embedBytes = await fetchBinaryWithProgress(
+    `${baseUrl}/onnx/embed_tokens.bin`,
+    'embed_tokens.bin',
+    38,
+    70,
+    onProgress,
+  );
   const hiddenSize = Number(meta.hidden_size ?? meta.hiddenSize ?? meta.shape?.[1]);
   const vocabSize = Number(meta.vocab_size ?? meta.vocabSize ?? meta.shape?.[0]);
 
   if (!Number.isFinite(hiddenSize) || !Number.isFinite(vocabSize)) {
     throw new Error('embed_tokens metadata is missing shape information');
   }
+  if (embedBytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new Error('embed_tokens.bin byte length is not aligned to float32 values');
+  }
 
   return {
-    weight: new Float32Array(buffer),
+    weight: new Float32Array(
+      embedBytes.buffer,
+      embedBytes.byteOffset,
+      embedBytes.byteLength / Float32Array.BYTES_PER_ELEMENT,
+    ),
     shape: { vocabSize, hiddenSize },
   };
 }
