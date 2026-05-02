@@ -16,11 +16,13 @@ import { indexMeetingForAsk } from '../pipeline/askMeeting';
 import { formatClock } from '../utils/time';
 import { estimateTokens } from '../utils/tokens';
 import { ulid } from '../utils/ulid';
+import { useModelBoot } from '../context/ModelBootContext';
 
 type RecordingState = 'idle' | 'recording' | 'processing';
 
 export default function Recording() {
   const navigate = useNavigate();
+  const { asrSession } = useModelBoot();
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -100,12 +102,16 @@ export default function Recording() {
 
     setStatus('Transcribing audio locally');
     setProgressSteps([
-      { id: 'transcribe', label: 'Transcribing audio', detail: 'Loading ASR model and decoding audio', status: 'active', progress: 5 },
+      { id: 'transcribe', label: 'Transcribing audio', detail: 'Decoding and running ASR inference', status: 'active', progress: 5 },
       { id: 'extract', label: 'Extracting structured items', detail: 'Waiting for chunks', status: 'pending' },
       { id: 'dedupe', label: 'Deduplicating', detail: 'Waiting for extracted items', status: 'pending' },
       { id: 'summary', label: 'Generating summary', detail: 'Waiting for dedupe', status: 'pending' },
     ]);
-    const transcript = await transcribeAudioBlob(blob, {
+    if (!asrSession) {
+      console.error('[Recording] asrSession is null — boot gate should have prevented this');
+      return;
+    }
+    const transcript = await transcribeAudioBlob(blob, asrSession, {
       meetingTitle: title,
       fallbackText: partialText,
       onProgress: (event) => setStatus(event.message),

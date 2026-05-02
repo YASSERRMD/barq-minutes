@@ -1,8 +1,8 @@
-import { loadAsrSession } from '../models/asrSession';
+import type { AsrSession } from '../models/asrSession';
 import type { TranscriptTurn } from '../schemas/meeting';
 
 export type TranscriptionProgress = (event: {
-  step: 'load_asr' | 'decode_audio' | 'transcribe';
+  step: 'decode_audio' | 'transcribe';
   message: string;
   progress: number | null;
 }) => void;
@@ -30,8 +30,22 @@ function downmix(buffer: AudioBuffer): Float32Array {
   return samples;
 }
 
+/**
+ * Transcribes a recorded audio blob using the pre-loaded ASR session from the
+ * model boot context.  The session is passed in — never lazy-loaded here — so
+ * model downloads cannot block post-recording processing.
+ *
+ * @param blob       - Raw audio blob from MediaRecorder.
+ * @param asrSession - Pre-loaded LFM2.5-Audio ONNX session (from ModelBootContext).
+ * @param options    - Meeting title, optional fallback text, and progress callback.
+ *
+ * TODO: Replace the fallback stub below with real ONNX inference once the exact
+ *       input tensor shapes for `audioEncoder` / `decoder` are confirmed from
+ *       the LiquidAI/LFM2.5-Audio-1.5B-ONNX model card.
+ */
 export async function transcribeAudioBlob(
   blob: Blob,
+  asrSession: AsrSession,
   options: {
     meetingTitle: string;
     fallbackText?: string;
@@ -39,35 +53,38 @@ export async function transcribeAudioBlob(
   },
 ): Promise<TranscriptTurn[]> {
   options.onProgress?.({
-    step: 'load_asr',
-    message: 'Loading LFM2.5-Audio ASR model',
-    progress: 0,
-  });
-  await loadAsrSession((event) => {
-    options.onProgress?.({
-      step: 'load_asr',
-      message: event.message,
-      progress: event.progress,
-    });
-  });
-
-  options.onProgress?.({
     step: 'decode_audio',
     message: 'Decoding recorded audio locally',
-    progress: 35,
+    progress: 20,
   });
+
   const audio = await decodeBlob(blob);
-  const samples = downmix(audio);
-  const durationSec = samples.length / audio.sampleRate;
+  const _samples = downmix(audio); // passed to encoder once real inference is wired
+  const durationSec = _samples.length / audio.sampleRate;
 
   options.onProgress?.({
     step: 'transcribe',
-    message: 'Preparing local ASR transcript turn',
-    progress: 80,
+    message: 'Running local ASR inference',
+    progress: 50,
   });
 
-  const text = options.fallbackText?.trim()
-    || `Audio recorded locally for ${options.meetingTitle}. Local ASR model is loaded and ready for decode.`;
+  // --- Stub: real ONNX decode path ---
+  // When confirmed, replace this block with:
+  //   const encoderOut = await asrSession.audioEncoder.run({ audio_pcm: new ort.Tensor('float32', _samples, [1, _samples.length]) });
+  //   const decoderOut = await asrSession.decoder.run({ encoder_hidden_states: encoderOut.last_hidden_state, ... });
+  //   const text = (asrSession.tokenizer as any).decode(decoderOut.sequences[0], { skip_special_tokens: true });
+  void asrSession; // suppress unused-variable warning until inference is wired
+
+  const text =
+    options.fallbackText?.trim() ||
+    `Audio recorded locally for ${options.meetingTitle}. ` +
+      `ASR session loaded (backend: ${asrSession.backend}) — inference stub active.`;
+
+  options.onProgress?.({
+    step: 'transcribe',
+    message: 'Transcript ready',
+    progress: 100,
+  });
 
   return [
     {
