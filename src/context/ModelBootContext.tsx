@@ -29,6 +29,10 @@ type ModelBootContextValue = {
   allReady: boolean;
   anyError: boolean;
   retry: () => void;
+  loadAll: () => Promise<void>;
+  ensureAsrSession: () => Promise<AsrSession>;
+  ensureLlmSession: () => Promise<LlmSession>;
+  ensureEmbeddingSession: () => Promise<EmbeddingSession>;
   llmSession: LlmSession | null;
   asrSession: AsrSession | null;
   embeddingSession: EmbeddingSession | null;
@@ -51,13 +55,16 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
     embeddings: idle('embeddings'),
   });
 
-  // Track sessions separately so TypeScript can type them cleanly.
   const [llmSession, setLlmSession] = useState<LlmSession | null>(null);
   const [asrSession, setAsrSession] = useState<AsrSession | null>(null);
   const [embeddingSession, setEmbeddingSession] = useState<EmbeddingSession | null>(null);
 
-  // Prevent double-loading in StrictMode.
-  const loadingRef = useRef(false);
+  const llmRef = useRef<LlmSession | null>(null);
+  const asrRef = useRef<AsrSession | null>(null);
+  const embeddingRef = useRef<EmbeddingSession | null>(null);
+  const llmLoadingRef = useRef<Promise<LlmSession> | null>(null);
+  const asrLoadingRef = useRef<Promise<AsrSession> | null>(null);
+  const embeddingLoadingRef = useRef<Promise<EmbeddingSession> | null>(null);
 
   const setModelProgress = useCallback(
     (key: ModelKey) =>
@@ -70,26 +77,24 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const load = useCallback(async () => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
+  const ensureAsrSession = useCallback(async () => {
+    if (asrRef.current) return asrRef.current;
+    if (asrLoadingRef.current) return asrLoadingRef.current;
 
-    setState({
-      llm: { ...idle('llm'), status: 'loading', message: 'Waiting for ASR WebGPU setup' },
-      asr: { ...idle('asr'), status: 'loading', message: 'Initializing...' },
-      embeddings: { ...idle('embeddings'), status: 'loading', message: 'Waiting for core model setup' },
-    });
+    setState((prev) => ({
+      ...prev,
+      asr: { ...prev.asr, status: 'loading', message: 'Preparing ASR model', progress: prev.asr.progress ?? 0 },
+    }));
 
-    await loadAsrSession(setModelProgress('asr'))
+    const promise = loadAsrSession(setModelProgress('asr'))
       .then((session) => {
+        asrRef.current = session;
         setAsrSession(session);
         setState((prev) => ({
           ...prev,
-          asr: { ...prev.asr, session, status: 'ready', progress: 100 },
-          llm: prev.llm.status === 'loading'
-            ? { ...prev.llm, message: 'Starting LLM WebGPU setup' }
-            : prev.llm,
+          asr: { ...prev.asr, session, status: 'ready', message: `ASR ready on ${session.backend}`, progress: 100 },
         }));
+        return session;
       })
       .catch((err) => {
         setState((prev) => ({
@@ -100,19 +105,35 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
             message: err instanceof Error ? err.message : String(err),
             progress: null,
           },
-          llm: prev.llm.status === 'loading'
-            ? { ...prev.llm, message: 'Starting LLM WebGPU setup' }
-            : prev.llm,
         }));
+        throw err;
+      })
+      .finally(() => {
+        asrLoadingRef.current = null;
       });
 
-    await loadLlmSession(setModelProgress('llm'))
+    asrLoadingRef.current = promise;
+    return promise;
+  }, [setModelProgress]);
+
+  const ensureLlmSession = useCallback(async () => {
+    if (llmRef.current) return llmRef.current;
+    if (llmLoadingRef.current) return llmLoadingRef.current;
+
+    setState((prev) => ({
+      ...prev,
+      llm: { ...prev.llm, status: 'loading', message: 'Preparing LLM model', progress: prev.llm.progress ?? 0 },
+    }));
+
+    const promise = loadLlmSession(setModelProgress('llm'))
       .then((session) => {
+        llmRef.current = session;
         setLlmSession(session);
         setState((prev) => ({
           ...prev,
-          llm: { ...prev.llm, session, status: 'ready', progress: 100 },
+          llm: { ...prev.llm, session, status: 'ready', message: 'LLM ready', progress: 100 },
         }));
+        return session;
       })
       .catch((err) => {
         setState((prev) => ({
@@ -124,22 +145,34 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
             progress: null,
           },
         }));
+        throw err;
+      })
+      .finally(() => {
+        llmLoadingRef.current = null;
       });
+
+    llmLoadingRef.current = promise;
+    return promise;
+  }, [setModelProgress]);
+
+  const ensureEmbeddingSession = useCallback(async () => {
+    if (embeddingRef.current) return embeddingRef.current;
+    if (embeddingLoadingRef.current) return embeddingLoadingRef.current;
 
     setState((prev) => ({
       ...prev,
-      embeddings: prev.embeddings.status === 'loading'
-        ? { ...prev.embeddings, message: 'Starting MiniLM embedding setup' }
-        : prev.embeddings,
+      embeddings: { ...prev.embeddings, status: 'loading', message: 'Preparing embedding model', progress: prev.embeddings.progress ?? 0 },
     }));
 
-    await loadEmbeddingSession(setModelProgress('embeddings'))
+    const promise = loadEmbeddingSession(setModelProgress('embeddings'))
       .then((session) => {
+        embeddingRef.current = session;
         setEmbeddingSession(session);
         setState((prev) => ({
           ...prev,
-          embeddings: { ...prev.embeddings, session, status: 'ready', progress: 100 },
+          embeddings: { ...prev.embeddings, session, status: 'ready', message: 'Embeddings ready', progress: 100 },
         }));
+        return session;
       })
       .catch((err) => {
         setState((prev) => ({
@@ -151,17 +184,29 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
             progress: null,
           },
         }));
+        throw err;
+      })
+      .finally(() => {
+        embeddingLoadingRef.current = null;
       });
+
+    embeddingLoadingRef.current = promise;
+    return promise;
   }, [setModelProgress]);
 
+  const loadAll = useCallback(async () => {
+    await ensureAsrSession();
+    await ensureLlmSession();
+    await ensureEmbeddingSession();
+  }, [ensureAsrSession, ensureEmbeddingSession, ensureLlmSession]);
+
   const retry = useCallback(() => {
-    loadingRef.current = false;
-    void load();
-  }, [load]);
+    void loadAll();
+  }, [loadAll]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadAll();
+  }, [loadAll]);
 
   const allReady =
     state.llm.status === 'ready' &&
@@ -175,7 +220,19 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ModelBootContext.Provider
-      value={{ state, allReady, anyError, retry, llmSession, asrSession, embeddingSession }}
+      value={{
+        state,
+        allReady,
+        anyError,
+        retry,
+        loadAll,
+        ensureAsrSession,
+        ensureLlmSession,
+        ensureEmbeddingSession,
+        llmSession,
+        asrSession,
+        embeddingSession,
+      }}
     >
       {children}
     </ModelBootContext.Provider>

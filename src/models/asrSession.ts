@@ -21,6 +21,7 @@ export type AsrSession = {
 };
 
 let asrPromise: Promise<AsrSession> | null = null;
+const ASR_CACHE_NAME = `barq-minutes:asr:${MODEL_IDS.asr}:${MODEL_DTYPES.asr}`;
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -46,6 +47,16 @@ function report(onProgress: AsrProgress | undefined, message: string, progress: 
   });
 }
 
+async function openModelCache(): Promise<Cache | null> {
+  if (!('caches' in window)) return null;
+  try {
+    return await caches.open(ASR_CACHE_NAME);
+  } catch (error) {
+    console.warn('[ASR] Browser cache unavailable', error);
+    return null;
+  }
+}
+
 async function fetchBinaryWithProgress(
   url: string,
   label: string,
@@ -53,6 +64,15 @@ async function fetchBinaryWithProgress(
   progressEnd: number,
   onProgress?: AsrProgress,
 ): Promise<Uint8Array> {
+  const cache = await openModelCache();
+  const cachedResponse = await cache?.match(url);
+  if (cachedResponse) {
+    report(onProgress, `Loading ${label} from browser cache`, progressStart);
+    const buffer = await cachedResponse.arrayBuffer();
+    report(onProgress, `Loaded ${label} from browser cache`, progressEnd);
+    return new Uint8Array(buffer);
+  }
+
   report(onProgress, `Downloading ${label}`, progressStart);
   const response = await fetch(url, { credentials: 'omit' });
   if (!response.ok) {
@@ -63,6 +83,12 @@ async function fetchBinaryWithProgress(
   const reader = response.body?.getReader();
   if (!reader) {
     const buffer = await response.arrayBuffer();
+    await cache?.put(url, new Response(buffer.slice(0), {
+      headers: {
+        'Content-Type': response.headers.get('Content-Type') || 'application/octet-stream',
+        'Content-Length': String(buffer.byteLength),
+      },
+    }));
     report(onProgress, `Downloaded ${label}`, progressEnd);
     return new Uint8Array(buffer);
   }
@@ -97,6 +123,12 @@ async function fetchBinaryWithProgress(
   }
 
   report(onProgress, `Downloaded ${label}`, progressEnd);
+  await cache?.put(url, new Response(data, {
+    headers: {
+      'Content-Type': response.headers.get('Content-Type') || 'application/octet-stream',
+      'Content-Length': String(data.byteLength),
+    },
+  }));
   return data;
 }
 

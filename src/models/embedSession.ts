@@ -10,6 +10,7 @@ export type EmbeddingSession = {
 let embedPromise: Promise<EmbeddingSession> | null = null;
 
 env.allowLocalModels = false;
+env.useBrowserCache = true;
 if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
 }
@@ -45,7 +46,7 @@ export async function loadEmbeddingSession(
         dtype: MODEL_DTYPES.embeddings,
         progress_callback: (event: any) => {
           if (event.status === 'progress') {
-            report(onProgress, `Downloading ${event.file ?? 'embedding model'}`, event.progress ?? null);
+            report(onProgress, `Loading ${event.file ?? 'embedding model'} from model cache`, event.progress ?? null);
           }
         },
       } as any);
