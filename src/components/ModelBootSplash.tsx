@@ -9,8 +9,8 @@ const MODEL_META: Record<ModelKey, { label: string; sub: string; Icon: React.Ele
     Icon: Brain,
   },
   asr: {
-    label: 'LFM2.5-Audio 1.5B (ASR)',
-    sub: 'Local speech-to-text · runs entirely in your browser',
+    label: 'Whisper Base WebGPU (ASR)',
+    sub: 'Local speech-to-text via onnx-community/whisper-base',
     Icon: Mic,
   },
   embeddings: {

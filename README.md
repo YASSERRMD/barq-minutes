@@ -68,7 +68,7 @@ Production deployments must serve the same headers.
 - Vite, React 19, TypeScript
 - `@huggingface/transformers`
 - ONNX Runtime Web
-- ASR: [LiquidAI/LFM2.5-Audio-1.5B-ONNX](https://huggingface.co/LiquidAI/LFM2.5-Audio-1.5B-ONNX), Q4
+- ASR: [onnx-community/whisper-base](https://huggingface.co/onnx-community/whisper-base), WebGPU mixed precision
 - LLM: [yasserrmd/glm5.1-distill-onnx](https://huggingface.co/yasserrmd/glm5.1-distill-onnx), Q4
 - Embeddings: [Xenova/all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2), Q8
 - Vector storage and retrieval: `barq-vweb`
@@ -80,7 +80,7 @@ Production deployments must serve the same headers.
 
 ```mermaid
 flowchart TD
-  A["Browser recording"] --> B["Local LFM2.5-Audio ASR"]
+  A["Browser recording"] --> B["Local Whisper WebGPU ASR"]
   B --> C["Transcript turns"]
   C --> D["1500-token overlapping extraction windows"]
   D --> E["Decision JSON extractor"]
