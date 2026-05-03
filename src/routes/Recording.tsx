@@ -17,11 +17,25 @@ import { formatClock } from '../utils/time';
 import { estimateTokens } from '../utils/tokens';
 import { ulid } from '../utils/ulid';
 import { useModelBoot } from '../context/ModelBootContext';
+import type { TranscriptTurn } from '../schemas/meeting';
 
 type RecordingState = 'idle' | 'recording' | 'stopping' | 'processing';
 
 const LIVE_TRANSCRIPTION_INTERVAL_MS = 10_000;
 const MIN_LIVE_TRANSCRIPTION_BYTES = 16_000;
+
+function transcriptFromLiveText(text: string, durationSec: number): TranscriptTurn[] {
+  const cleanText = text.trim();
+  if (!cleanText) return [];
+  return [
+    {
+      speaker: 'Speaker 1',
+      text: cleanText,
+      startSec: 0,
+      endSec: Math.max(1, durationSec),
+    },
+  ];
+}
 
 export default function Recording() {
   const navigate = useNavigate();
@@ -185,22 +199,34 @@ export default function Recording() {
     const endedAt = Date.now();
     const duration = Math.max(1, Math.floor((endedAt - startedAtRef.current) / 1000));
 
-    setStatus('Transcribing audio locally');
+    const liveTranscriptText = partialTextRef.current.trim();
+    setStatus(liveTranscriptText ? 'Using live transcript for processing' : 'Transcribing audio locally');
     setProgressSteps([
-      { id: 'transcribe', label: 'Transcribing audio', detail: 'Decoding and running ASR inference', status: 'active', progress: 5 },
+      {
+        id: 'transcribe',
+        label: 'Transcribing audio',
+        detail: liveTranscriptText ? 'Using live transcript from recorder' : 'Decoding and running ASR inference',
+        status: 'active',
+        progress: liveTranscriptText ? 90 : 5,
+      },
       { id: 'extract', label: 'Extracting structured items', detail: 'Waiting for chunks', status: 'pending' },
       { id: 'dedupe', label: 'Deduplicating', detail: 'Waiting for extracted items', status: 'pending' },
       { id: 'summary', label: 'Generating summary', detail: 'Waiting for dedupe', status: 'pending' },
     ]);
-    if (!asrSession) {
-      console.error('[Recording] asrSession is null. Boot gate should have prevented this');
-      return;
+
+    let transcript = transcriptFromLiveText(liveTranscriptText, duration);
+    if (transcript.length === 0) {
+      if (!asrSession) {
+        console.error('[Recording] asrSession is null. Boot gate should have prevented this');
+        return;
+      }
+      transcript = await transcribeAudioBlob(blob, asrSession, {
+        meetingTitle: title,
+        fallbackText: partialTextRef.current,
+        onProgress: (event) => setStatus(event.message),
+      });
     }
-    const transcript = await transcribeAudioBlob(blob, asrSession, {
-      meetingTitle: title,
-      fallbackText: partialTextRef.current,
-      onProgress: (event) => setStatus(event.message),
-    });
+
     const finalTranscriptText = transcript.map((turn) => turn.text).join('\n').trim();
     if (finalTranscriptText) {
       partialTextRef.current = finalTranscriptText;
