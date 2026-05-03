@@ -74,77 +74,84 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
     if (loadingRef.current) return;
     loadingRef.current = true;
 
-    // Reset to loading state.
     setState({
-      llm: { ...idle('llm'), status: 'loading', message: 'Initialising…' },
-      asr: { ...idle('asr'), status: 'loading', message: 'Initialising…' },
-      embeddings: { ...idle('embeddings'), status: 'loading', message: 'Initialising…' },
+      llm: { ...idle('llm'), status: 'loading', message: 'Waiting for ASR WebGPU setup' },
+      asr: { ...idle('asr'), status: 'loading', message: 'Initializing...' },
+      embeddings: { ...idle('embeddings'), status: 'loading', message: 'Waiting for core model setup' },
     });
 
-    await Promise.allSettled([
-      // LLM
-      loadLlmSession(setModelProgress('llm'))
-        .then((session) => {
-          setLlmSession(session);
-          setState((prev) => ({
-            ...prev,
-            llm: { ...prev.llm, session, status: 'ready', progress: 100 },
-          }));
-        })
-        .catch((err) => {
-          setState((prev) => ({
-            ...prev,
-            llm: {
-              ...prev.llm,
-              status: 'error',
-              message: err instanceof Error ? err.message : String(err),
-              progress: null,
-            },
-          }));
-        }),
+    await loadAsrSession(setModelProgress('asr'))
+      .then((session) => {
+        setAsrSession(session);
+        setState((prev) => ({
+          ...prev,
+          asr: { ...prev.asr, session, status: 'ready', progress: 100 },
+          llm: prev.llm.status === 'loading'
+            ? { ...prev.llm, message: 'Starting LLM WebGPU setup' }
+            : prev.llm,
+        }));
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          asr: {
+            ...prev.asr,
+            status: 'error',
+            message: err instanceof Error ? err.message : String(err),
+            progress: null,
+          },
+          llm: prev.llm.status === 'loading'
+            ? { ...prev.llm, message: 'Starting LLM WebGPU setup' }
+            : prev.llm,
+        }));
+      });
 
-      // ASR
-      loadAsrSession(setModelProgress('asr'))
-        .then((session) => {
-          setAsrSession(session);
-          setState((prev) => ({
-            ...prev,
-            asr: { ...prev.asr, session, status: 'ready', progress: 100 },
-          }));
-        })
-        .catch((err) => {
-          setState((prev) => ({
-            ...prev,
-            asr: {
-              ...prev.asr,
-              status: 'error',
-              message: err instanceof Error ? err.message : String(err),
-              progress: null,
-            },
-          }));
-        }),
+    await loadLlmSession(setModelProgress('llm'))
+      .then((session) => {
+        setLlmSession(session);
+        setState((prev) => ({
+          ...prev,
+          llm: { ...prev.llm, session, status: 'ready', progress: 100 },
+        }));
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          llm: {
+            ...prev.llm,
+            status: 'error',
+            message: err instanceof Error ? err.message : String(err),
+            progress: null,
+          },
+        }));
+      });
 
-      // Embeddings
-      loadEmbeddingSession(setModelProgress('embeddings'))
-        .then((session) => {
-          setEmbeddingSession(session);
-          setState((prev) => ({
-            ...prev,
-            embeddings: { ...prev.embeddings, session, status: 'ready', progress: 100 },
-          }));
-        })
-        .catch((err) => {
-          setState((prev) => ({
-            ...prev,
-            embeddings: {
-              ...prev.embeddings,
-              status: 'error',
-              message: err instanceof Error ? err.message : String(err),
-              progress: null,
-            },
-          }));
-        }),
-    ]);
+    setState((prev) => ({
+      ...prev,
+      embeddings: prev.embeddings.status === 'loading'
+        ? { ...prev.embeddings, message: 'Starting MiniLM embedding setup' }
+        : prev.embeddings,
+    }));
+
+    await loadEmbeddingSession(setModelProgress('embeddings'))
+      .then((session) => {
+        setEmbeddingSession(session);
+        setState((prev) => ({
+          ...prev,
+          embeddings: { ...prev.embeddings, session, status: 'ready', progress: 100 },
+        }));
+      })
+      .catch((err) => {
+        setState((prev) => ({
+          ...prev,
+          embeddings: {
+            ...prev.embeddings,
+            status: 'error',
+            message: err instanceof Error ? err.message : String(err),
+            progress: null,
+          },
+        }));
+      });
   }, [setModelProgress]);
 
   const retry = useCallback(() => {
