@@ -4,6 +4,7 @@ import { ArrowLeft, Calendar, Clock } from 'lucide-react';
 import AskBox from '../components/AskBox';
 import ExportButtons from '../components/ExportButtons';
 import TranscriptViewer from '../components/TranscriptViewer';
+import { buildFallbackSummary } from '../pipeline/summarize';
 import type { Meeting as MeetingRecord } from '../schemas/meeting';
 import { getMeeting } from '../storage/meetings';
 import { formatClock, formatDateTime } from '../utils/time';
@@ -53,6 +54,8 @@ export default function Meeting() {
     );
   }
 
+  const summary = meeting.summary.length > 0 ? meeting.summary : buildFallbackSummary(meeting);
+
   return (
     <section>
       <header className="page-header">
@@ -83,10 +86,9 @@ export default function Meeting() {
 
         <Section title="Executive Summary">
           <ul className="summary-list">
-            {meeting.summary.map((item, index) => (
+            {summary.map((item, index) => (
               <li key={index}>{item}</li>
             ))}
-            {meeting.summary.length === 0 ? <li>No summary generated</li> : null}
           </ul>
         </Section>
 
