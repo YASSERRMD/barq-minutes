@@ -140,16 +140,14 @@ export async function loadLlmSession(
           });
 
           let streamed = '';
-          const streamer = options.onToken
-            ? new TextStreamer(tokenizer as any, {
-                skip_prompt: true,
-                skip_special_tokens: false,
-                callback_function: (token: string) => {
-                  streamed += token;
-                  options.onToken?.(token);
-                },
-              })
-            : undefined;
+          const streamer = new TextStreamer(tokenizer as any, {
+            skip_prompt: true,
+            skip_special_tokens: false,
+            callback_function: (token: string) => {
+              streamed += token;
+              options.onToken?.(token);
+            },
+          });
 
           const output = await model.generate({
             ...input,

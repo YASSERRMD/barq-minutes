@@ -1,10 +1,12 @@
 import { Download, FileText } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
+import { buildFallbackSummary } from '../pipeline/summarize';
 import type { Meeting } from '../schemas/meeting';
 import { formatClock, formatDateTime } from '../utils/time';
 
 function markdown(meeting: Meeting) {
+  const summary = meeting.summary.length > 0 ? meeting.summary : buildFallbackSummary(meeting);
   const lines = [
     `# ${meeting.title}`,
     '',
@@ -12,7 +14,7 @@ function markdown(meeting: Meeting) {
     `Duration: ${formatClock(meeting.durationSec)}`,
     '',
     '## Summary',
-    ...meeting.summary.map((item) => `- ${item}`),
+    ...summary.map((item) => `- ${item}`),
     '',
     '## Decisions',
     ...meeting.decisions.map((item) => `- ${formatClock(item.timestampSec)} ${item.text}`),
@@ -39,6 +41,7 @@ function downloadText(filename: string, content: string) {
 }
 
 function exportNode(meeting: Meeting) {
+  const summary = meeting.summary.length > 0 ? meeting.summary : buildFallbackSummary(meeting);
   const node = document.createElement('div');
   node.style.position = 'fixed';
   node.style.left = '-10000px';
@@ -52,7 +55,7 @@ function exportNode(meeting: Meeting) {
     <h1>${meeting.title}</h1>
     <p>${formatDateTime(meeting.startedAt)} | ${formatClock(meeting.durationSec)}</p>
     <h2>Summary</h2>
-    <ul>${meeting.summary.map((item) => `<li>${item}</li>`).join('')}</ul>
+    <ul>${summary.map((item) => `<li>${item}</li>`).join('')}</ul>
     <h2>Decisions</h2>
     <ul>${meeting.decisions.map((item) => `<li>${item.text}</li>`).join('')}</ul>
     <h2>Action Items</h2>
