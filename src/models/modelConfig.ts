@@ -1,18 +1,18 @@
 export const MODEL_IDS = {
   llm: 'yasserrmd/glm5.1-distill-onnx',
-  asr: 'LiquidAI/LFM2.5-Audio-1.5B-ONNX',
+  asr: 'onnx-community/whisper-base',
   embeddings: 'Xenova/all-MiniLM-L6-v2',
 } as const;
 
 export const MODEL_DTYPES = {
   llm: 'q4',
-  asr: 'q4',
+  asr: 'webgpu-mixed',
   embeddings: 'q8',
 } as const;
 
 export const MODEL_CACHE_KEYS = {
   llm: 'barq-minutes:glm5.1-distill:q4',
-  asr: 'barq-minutes:lfm2.5-audio:q4',
+  asr: 'barq-minutes:whisper-base:webgpu-mixed',
   embeddings: 'barq-minutes:minilm:q8',
 } as const;
 
