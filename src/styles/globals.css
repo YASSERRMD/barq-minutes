@@ -168,6 +168,15 @@ button {
   color: var(--danger);
 }
 
+.button.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.button input[type="file"] {
+  display: none;
+}
+
 .icon-button {
   width: 40px;
 }
@@ -324,6 +333,23 @@ button {
 
 .toggle-row input {
   width: auto;
+}
+
+.upload-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--surface-2);
+}
+
+.upload-box p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .section-title {
