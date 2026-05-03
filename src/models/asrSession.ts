@@ -139,7 +139,6 @@ async function loadSession(
   progressStart: number,
   progressEnd: number,
   onProgress?: AsrProgress,
-  extraOptions: ort.InferenceSession.SessionOptions = {},
 ) {
   const graphName = `${name}_${MODEL_DTYPES.asr}`;
   const onnxPath = `${baseUrl}/onnx/${graphName}.onnx`;
@@ -163,7 +162,6 @@ async function loadSession(
   );
 
   const options: ort.InferenceSession.SessionOptions = {
-    ...extraOptions,
     executionProviders: provider === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'],
     externalData: [
       {
@@ -224,23 +222,6 @@ async function loadEmbedTokens(baseUrl: string, onProgress?: AsrProgress) {
   };
 }
 
-function decoderSessionOptions(
-  backend: 'webgpu' | 'wasm',
-  layerTypes: string[],
-): ort.InferenceSession.SessionOptions {
-  if (backend !== 'webgpu') return {};
-  const preferredOutputLocation: Record<string, 'gpu-buffer'> = {};
-  for (let i = 0; i < layerTypes.length; i++) {
-    if (layerTypes[i] === 'conv') {
-      preferredOutputLocation[`present_conv.${i}`] = 'gpu-buffer';
-    } else {
-      preferredOutputLocation[`present.${i}.key`] = 'gpu-buffer';
-      preferredOutputLocation[`present.${i}.value`] = 'gpu-buffer';
-    }
-  }
-  return { preferredOutputLocation };
-}
-
 export async function loadAsrSession(onProgress?: AsrProgress): Promise<AsrSession> {
   if (asrPromise) return asrPromise;
 
@@ -268,15 +249,7 @@ export async function loadAsrSession(onProgress?: AsrProgress): Promise<AsrSessi
       const embed = await loadEmbedTokens(baseUrl, onProgress);
 
       report(onProgress, `Loading LFM2.5-Audio decoder on ${backend}`, 75);
-      const decoder = await loadSession(
-        baseUrl,
-        'decoder',
-        backend,
-        75,
-        98,
-        onProgress,
-        decoderSessionOptions(backend, lfmConfig.layer_types || []),
-      );
+      const decoder = await loadSession(baseUrl, 'decoder', backend, 75, 98, onProgress);
 
       onProgress?.({
         status: 'ready',
