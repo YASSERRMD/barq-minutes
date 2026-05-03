@@ -71,6 +71,8 @@ export async function transcribeAudioBlob(
   options: {
     meetingTitle: string;
     fallbackText?: string;
+    allowEmpty?: boolean;
+    maxTokens?: number;
     onProgress?: TranscriptionProgress;
   },
 ): Promise<TranscriptTurn[]> {
@@ -154,7 +156,7 @@ export async function transcribeAudioBlob(
 
   const generatedTokens: number[] = [];
   let currentLen = totalLen;
-  const maxTokens = 100;
+  const maxTokens = options.maxTokens ?? Math.min(4096, Math.max(160, Math.ceil(durationSec * 6)));
   const eosTokenId = getTokenizerEosId(asrSession.tokenizer);
 
   for (let i = 0; i < maxTokens; i++) {
@@ -181,7 +183,7 @@ export async function transcribeAudioBlob(
 
   const generatedText = (asrSession.tokenizer as any).decode(generatedTokens, { skip_special_tokens: true });
 
-  const text = generatedText.trim() || options.fallbackText?.trim() || `[Audio recorded for ${options.meetingTitle}]`;
+  const text = generatedText.trim();
 
   options.onProgress?.({
     step: 'transcribe',
@@ -189,10 +191,21 @@ export async function transcribeAudioBlob(
     progress: 100,
   });
 
+  if (!text && options.allowEmpty) {
+    return [
+      {
+        speaker: 'Speaker 1',
+        text: '',
+        startSec: 0,
+        endSec: Math.max(1, durationSec),
+      },
+    ];
+  }
+
   return [
     {
       speaker: 'Speaker 1',
-      text,
+      text: text || options.fallbackText?.trim() || `[Audio recorded for ${options.meetingTitle}]`,
       startSec: 0,
       endSec: Math.max(1, durationSec),
     },
