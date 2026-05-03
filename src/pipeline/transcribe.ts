@@ -43,6 +43,9 @@ function toNumberTokenId(value: unknown): number {
 }
 
 function encodeTokenIds(tokenizer: any, text: string): number[] {
+  if (typeof tokenizer.encode === 'function') {
+    return Array.from(tokenizer.encode(text, { add_special_tokens: false }), toNumberTokenId);
+  }
   const encoded = tokenizer(text, { add_special_tokens: false });
   const data = encoded?.input_ids?.data ?? encoded?.input_ids ?? encoded;
   return Array.from(data, toNumberTokenId);
