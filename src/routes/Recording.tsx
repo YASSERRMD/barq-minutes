@@ -9,7 +9,7 @@ import { extractQuestions } from '../pipeline/extractQuestions';
 import { chunkTranscriptForExtraction } from '../pipeline/chunker';
 import { dedupeStructuredItems } from '../pipeline/dedupe';
 import { generateFinalSummary } from '../pipeline/summarize';
-import { transcribeAudioBlob } from '../pipeline/transcribe';
+import { ASR_SAMPLE_RATE, transcribeAudioBlob, transcribeAudioSamples } from '../pipeline/transcribe';
 import { saveAudioBlob } from '../storage/audio';
 import { saveMeeting } from '../storage/meetings';
 import { indexMeetingForAsk } from '../pipeline/askMeeting';
@@ -22,7 +22,7 @@ import type { TranscriptTurn } from '../schemas/meeting';
 type RecordingState = 'idle' | 'recording' | 'stopping' | 'processing';
 
 const LIVE_TRANSCRIPTION_INTERVAL_MS = 10_000;
-const MIN_LIVE_TRANSCRIPTION_BYTES = 16_000;
+const MIN_LIVE_TRANSCRIPTION_SEC = 3;
 
 function transcriptFromText(text: string, durationSec: number): TranscriptTurn[] {
   const cleanText = text.trim();
@@ -41,6 +41,16 @@ function transcriptText(turns: TranscriptTurn[]) {
   return turns.map((turn) => turn.text.trim()).filter(Boolean).join('\n');
 }
 
+function concatSamples(chunks: Float32Array[], totalSamples: number) {
+  const samples = new Float32Array(totalSamples);
+  let offset = 0;
+  for (const chunk of chunks) {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return samples;
+}
+
 export default function Recording() {
   const navigate = useNavigate();
   const {
@@ -55,8 +65,14 @@ export default function Recording() {
   const activeAsrSessionRef = useRef<typeof asrSession>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const silenceGainRef = useRef<GainNode | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const pendingLiveChunksRef = useRef<BlobPart[]>([]);
+  const pendingLiveSampleChunksRef = useRef<Float32Array[]>([]);
+  const pendingLiveSampleCountRef = useRef(0);
+  const allLiveSampleChunksRef = useRef<Float32Array[]>([]);
+  const allLiveSampleCountRef = useRef(0);
+  const liveSampleRateRef = useRef(ASR_SAMPLE_RATE);
   const partialTurnsRef = useRef<TranscriptTurn[]>([]);
   const startedAtRef = useRef<number>(0);
   const liveTimerRef = useRef<number | null>(null);
@@ -98,6 +114,10 @@ export default function Recording() {
       if (liveTimerRef.current !== null) {
         window.clearInterval(liveTimerRef.current);
       }
+      processorRef.current?.disconnect();
+      silenceGainRef.current?.disconnect();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      void audioContextRef.current?.close();
     };
   }, []);
 
@@ -114,7 +134,7 @@ export default function Recording() {
 
   async function runLiveTranscription(finalPass = false) {
     const session = activeAsrSessionRef.current ?? asrSession;
-    if (!session || !recorderRef.current) return;
+    if (!session) return;
     if (liveTranscribingRef.current) {
       if (finalPass && liveTranscriptionPromiseRef.current) {
         await liveTranscriptionPromiseRef.current;
@@ -122,14 +142,18 @@ export default function Recording() {
       return;
     }
 
-    const pendingChunks = pendingLiveChunksRef.current;
-    const blob = new Blob(pendingChunks, { type: recorderRef.current.mimeType || 'audio/webm' });
-    if (blob.size === 0) return;
-    if (!finalPass && blob.size < MIN_LIVE_TRANSCRIPTION_BYTES) return;
+    const pendingChunks = pendingLiveSampleChunksRef.current;
+    const pendingSampleCount = pendingLiveSampleCountRef.current;
+    const sampleRate = liveSampleRateRef.current;
+    const pendingDurationSec = pendingSampleCount / sampleRate;
+    if (pendingSampleCount === 0) return;
+    if (!finalPass && pendingDurationSec < MIN_LIVE_TRANSCRIPTION_SEC) return;
 
     liveTranscribingRef.current = true;
-    pendingLiveChunksRef.current = [];
+    pendingLiveSampleChunksRef.current = [];
+    pendingLiveSampleCountRef.current = 0;
     const segmentStartSec = pendingLiveStartSecRef.current;
+    const samples = concatSamples(pendingChunks, pendingSampleCount);
     setStatus(finalPass ? 'Completing final live transcript segment' : 'Live transcription segment running');
     setProgressSteps((steps) => steps.map((step) => (
       step.id === 'transcribe'
@@ -142,20 +166,14 @@ export default function Recording() {
         : step
     )));
 
-    const promise = transcribeAudioBlob(blob, session, {
+    const promise = transcribeAudioSamples(samples, sampleRate, session, {
       meetingTitle: title,
       allowEmpty: true,
+      startSec: segmentStartSec,
       onProgress: finalPass ? (event) => setStatus(event.message) : undefined,
     })
       .then((turns) => {
-        const segmentDuration = Math.max(0, ...turns.map((turn) => turn.endSec));
-        const shiftedTurns = turns
-          .filter((turn) => turn.text.trim())
-          .map((turn) => ({
-            ...turn,
-            startSec: segmentStartSec + turn.startSec,
-            endSec: segmentStartSec + turn.endSec,
-          }));
+        const shiftedTurns = turns.filter((turn) => turn.text.trim());
 
         if (shiftedTurns.length > 0) {
           partialTurnsRef.current = [...partialTurnsRef.current, ...shiftedTurns];
@@ -164,12 +182,13 @@ export default function Recording() {
           setPartialText(nextText);
         }
 
-        processedLiveSecRef.current = Math.max(processedLiveSecRef.current, segmentStartSec + segmentDuration);
+        processedLiveSecRef.current = Math.max(processedLiveSecRef.current, segmentStartSec + pendingDurationSec);
         pendingLiveStartSecRef.current = processedLiveSecRef.current;
         setStatus(finalPass ? 'Transcript complete' : 'Recording audio locally. Live transcript updated');
       })
       .catch((error) => {
-        pendingLiveChunksRef.current = [...pendingChunks, ...pendingLiveChunksRef.current];
+        pendingLiveSampleChunksRef.current = [...pendingChunks, ...pendingLiveSampleChunksRef.current];
+        pendingLiveSampleCountRef.current += pendingSampleCount;
         pendingLiveStartSecRef.current = segmentStartSec;
         console.warn('[Recording] Live transcription failed', error);
         setStatus(finalPass ? 'Final transcription failed' : 'Recording audio locally. Live transcript will retry');
@@ -192,20 +211,37 @@ export default function Recording() {
     const session = asrSession ?? await ensureAsrSession();
     activeAsrSessionRef.current = session;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const audioContext = new AudioContext();
+    const audioContext = new AudioContext({ sampleRate: ASR_SAMPLE_RATE });
     const source = audioContext.createMediaStreamSource(stream);
     const nextAnalyser = audioContext.createAnalyser();
     nextAnalyser.fftSize = 2048;
     source.connect(nextAnalyser);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    const silenceGain = audioContext.createGain();
+    silenceGain.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      if (recorderRef.current?.state !== 'recording') return;
+      const input = event.inputBuffer.getChannelData(0);
+      const samples = input.slice();
+      pendingLiveSampleChunksRef.current.push(samples);
+      pendingLiveSampleCountRef.current += samples.length;
+      allLiveSampleChunksRef.current.push(samples);
+      allLiveSampleCountRef.current += samples.length;
+    };
+    source.connect(processor);
+    processor.connect(silenceGain);
+    silenceGain.connect(audioContext.destination);
 
     chunksRef.current = [];
-    pendingLiveChunksRef.current = [];
+    pendingLiveSampleChunksRef.current = [];
+    pendingLiveSampleCountRef.current = 0;
+    allLiveSampleChunksRef.current = [];
+    allLiveSampleCountRef.current = 0;
     partialTurnsRef.current = [];
     const recorder = new MediaRecorder(stream);
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         chunksRef.current.push(event.data);
-        pendingLiveChunksRef.current.push(event.data);
       }
     };
     recorder.start(1000);
@@ -213,6 +249,9 @@ export default function Recording() {
     recorderRef.current = recorder;
     streamRef.current = stream;
     audioContextRef.current = audioContext;
+    processorRef.current = processor;
+    silenceGainRef.current = silenceGain;
+    liveSampleRateRef.current = audioContext.sampleRate;
     startedAtRef.current = Date.now();
     setDurationSec(0);
     setAnalyser(nextAnalyser);
@@ -365,8 +404,14 @@ export default function Recording() {
     recorder.stop();
     await stopped;
 
+    processorRef.current?.disconnect();
+    silenceGainRef.current?.disconnect();
+    processorRef.current = null;
+    silenceGainRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     await audioContextRef.current?.close();
+    audioContextRef.current = null;
+    streamRef.current = null;
     setAnalyser(null);
     setMuted(false);
     setState('processing');
@@ -391,13 +436,14 @@ export default function Recording() {
 
     if (!editedText && duration >= 30 && transcriptEndSec < duration * 0.6) {
       const session = activeAsrSessionRef.current ?? asrSession ?? await ensureAsrSession();
+      const fullSamples = concatSamples(allLiveSampleChunksRef.current, allLiveSampleCountRef.current);
       setStatus('Live transcript coverage is incomplete. Recovering full transcript');
       setProgressSteps((steps) => steps.map((step) => (
         step.id === 'transcribe'
           ? { ...step, status: 'active', detail: 'Recovering full transcript', progress: 5 }
           : step
       )));
-      transcript = await transcribeAudioBlob(blob, session, {
+      transcript = await transcribeAudioSamples(fullSamples, liveSampleRateRef.current, session, {
         meetingTitle: title,
         fallbackText: liveText,
         onProgress: (event) => {

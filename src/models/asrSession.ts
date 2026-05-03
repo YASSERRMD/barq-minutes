@@ -149,7 +149,7 @@ export async function loadAsrSession(onProgress?: AsrProgress): Promise<AsrSessi
           const output = await model.generate({
             ...inputs,
             max_new_tokens: options.maxNewTokens ?? 128,
-            language: options.language ?? 'english',
+            language: options.language ?? 'en',
             streamer,
           });
           const decoded = tokenizer.batch_decode(output, { skip_special_tokens: true });
