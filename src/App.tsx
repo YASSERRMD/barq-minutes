@@ -4,12 +4,19 @@ import Dashboard from './routes/Dashboard';
 import Meeting from './routes/Meeting';
 import Recording from './routes/Recording';
 import Settings from './routes/Settings';
+import { ModelBootProvider, useModelBoot } from './context/ModelBootContext';
+import ModelBootSplash from './components/ModelBootSplash';
 
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? 'nav-link active' : 'nav-link';
 }
 
-export default function App() {
+/** Inner shell only renders once the boot gate passes. */
+function AppShell() {
+  const { allReady } = useModelBoot();
+
+  if (!allReady) return <ModelBootSplash />;
+
   return (
     <div className="app-frame">
       <aside className="sidebar" aria-label="Primary">
@@ -41,5 +48,13 @@ export default function App() {
         </Routes>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ModelBootProvider>
+      <AppShell />
+    </ModelBootProvider>
   );
 }
