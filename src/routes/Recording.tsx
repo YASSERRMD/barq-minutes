@@ -49,6 +49,7 @@ export default function Recording() {
     ensureLlmSession,
     ensureEmbeddingSession,
     state: modelState,
+    allReady,
   } = useModelBoot();
   const recorderRef = useRef<MediaRecorder | null>(null);
   const activeAsrSessionRef = useRef<typeof asrSession>(null);
@@ -101,11 +102,15 @@ export default function Recording() {
   }, []);
 
   const tokenEstimate = useMemo(() => estimateTokens(partialText), [partialText]);
-  const asrModelStatus = modelState.asr.status === 'ready'
-    ? 'ASR ready'
-    : modelState.asr.status === 'loading'
-      ? modelState.asr.message
-      : 'ASR loads on record or upload';
+  const asrModelStatus = allReady
+    ? 'All local models ready'
+    : 'Preparing local model cache before recording or upload';
+  const modelRows = [
+    { key: 'ASR', state: modelState.asr },
+    { key: 'Extraction', state: modelState.llm },
+    { key: 'Search', state: modelState.embeddings },
+  ];
+  const canStartInput = state === 'idle' && allReady;
 
   async function runLiveTranscription(finalPass = false) {
     const session = activeAsrSessionRef.current ?? asrSession;
@@ -179,6 +184,10 @@ export default function Recording() {
   }
 
   async function startRecording() {
+    if (!canStartInput) {
+      setStatus('Local models are still preparing');
+      return;
+    }
     setStatus(asrSession ? 'ASR model ready' : 'Loading ASR model from browser cache');
     const session = asrSession ?? await ensureAsrSession();
     activeAsrSessionRef.current = session;
@@ -414,7 +423,7 @@ export default function Recording() {
   }
 
   async function importAudioFile(file: File | null) {
-    if (!file || state !== 'idle') return;
+    if (!file || !canStartInput) return;
 
     setState('processing');
     setStatus(asrSession ? `Transcribing ${file.name}` : 'Loading ASR model from browser cache');
@@ -488,13 +497,25 @@ export default function Recording() {
           </label>
           <p className="model-inline-status">{asrModelStatus}</p>
 
+          <div className="model-prep-box">
+            <h2 className="section-title">Local model cache</h2>
+            <div className="model-prep-list">
+              {modelRows.map((row) => (
+                <div key={row.key} className="model-prep-row">
+                  <span>{row.key}</span>
+                  <strong>{row.state.status === 'ready' ? 'Ready' : row.state.status === 'error' ? 'Error' : row.state.message}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <Waveform analyser={analyser} />
 
           <div className="record-controls">
             {state === 'idle' ? (
-              <button className="button primary" type="button" onClick={startRecording}>
+              <button className="button primary" type="button" onClick={startRecording} disabled={!canStartInput}>
                 <Mic size={18} />
-                Record
+                {allReady ? 'Record' : 'Preparing models'}
               </button>
             ) : state === 'recording' ? (
               <>
@@ -528,13 +549,13 @@ export default function Recording() {
               <h2 className="section-title">Import audio</h2>
               <p>Upload MP3, OGG, WAV, M4A, WebM, or FLAC and process it with the same local pipeline.</p>
             </div>
-            <label className={`button ${state === 'idle' ? '' : 'disabled'}`}>
+            <label className={`button ${canStartInput ? '' : 'disabled'}`}>
               <Upload size={18} />
-              Choose audio
+              {allReady ? 'Choose audio' : 'Preparing models'}
               <input
                 type="file"
                 accept="audio/*,.mp3,.ogg,.oga,.wav,.m4a,.webm,.flac"
-                disabled={state !== 'idle'}
+                disabled={!canStartInput}
                 onChange={(event) => {
                   void importAudioFile(event.target.files?.[0] ?? null);
                   event.target.value = '';

@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -200,6 +201,10 @@ export function ModelBootProvider({ children }: { children: React.ReactNode }) {
   }, [ensureAsrSession, ensureEmbeddingSession, ensureLlmSession]);
 
   const retry = useCallback(() => {
+    void loadAll();
+  }, [loadAll]);
+
+  useEffect(() => {
     void loadAll();
   }, [loadAll]);
 

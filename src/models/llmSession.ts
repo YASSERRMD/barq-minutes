@@ -46,6 +46,7 @@ function isOrtSessionCreationRace(error: unknown) {
 }
 
 env.allowLocalModels = false;
+env.useBrowserCache = true;
 if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
 }
@@ -91,7 +92,7 @@ export async function loadLlmSession(
       const tokenizer = await AutoTokenizer.from_pretrained(MODEL_IDS.llm, {
         progress_callback: (event: any) => {
           if (event.status === 'progress') {
-            report(onProgress, `Downloading ${event.file ?? 'tokenizer'}`, event.progress ?? null);
+            report(onProgress, `Loading ${event.file ?? 'tokenizer'} from model cache`, event.progress ?? null);
           }
         },
       });
@@ -104,7 +105,7 @@ export async function loadLlmSession(
           dtype: MODEL_DTYPES.llm,
           progress_callback: (event: any) => {
             if (event.status === 'progress') {
-              report(onProgress, `Downloading ${event.file ?? 'model weights'}`, event.progress ?? null);
+              report(onProgress, `Loading ${event.file ?? 'model weights'} from model cache`, event.progress ?? null);
             }
           },
         } as const;

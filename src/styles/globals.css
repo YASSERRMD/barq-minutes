@@ -356,6 +356,35 @@ button {
   font-size: 0.88rem;
 }
 
+.model-prep-box {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--surface-2);
+}
+
+.model-prep-list {
+  display: grid;
+  gap: 8px;
+}
+
+.model-prep-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.model-prep-row strong {
+  color: hsl(210 10% 12%);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .waveform {
   width: 100%;
   aspect-ratio: 24 / 5;
