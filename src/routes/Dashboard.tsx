@@ -42,6 +42,15 @@ export default function Dashboard() {
 
   return (
     <section>
+      <section className="app-banner" aria-label="barq-minutes overview">
+        <div className="app-banner-copy">
+          <p className="page-kicker">Private meeting intelligence</p>
+          <h1>barq-minutes</h1>
+          <p>Record, transcribe, extract decisions, and search meetings locally in the browser.</p>
+        </div>
+        <img src="/readme-hero.png" alt="barq-minutes local meeting intelligence workflow" />
+      </section>
+
       <header className="page-header">
         <div>
           <p className="page-kicker">Dashboard</p>

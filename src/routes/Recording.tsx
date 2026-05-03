@@ -43,8 +43,15 @@ function transcriptText(turns: TranscriptTurn[]) {
 
 export default function Recording() {
   const navigate = useNavigate();
-  const { asrSession } = useModelBoot();
+  const {
+    asrSession,
+    ensureAsrSession,
+    ensureLlmSession,
+    ensureEmbeddingSession,
+    state: modelState,
+  } = useModelBoot();
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const activeAsrSessionRef = useRef<typeof asrSession>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -94,9 +101,15 @@ export default function Recording() {
   }, []);
 
   const tokenEstimate = useMemo(() => estimateTokens(partialText), [partialText]);
+  const asrModelStatus = modelState.asr.status === 'ready'
+    ? 'ASR ready'
+    : modelState.asr.status === 'loading'
+      ? modelState.asr.message
+      : 'ASR loads on record or upload';
 
   async function runLiveTranscription(finalPass = false) {
-    if (!asrSession || !recorderRef.current) return;
+    const session = activeAsrSessionRef.current ?? asrSession;
+    if (!session || !recorderRef.current) return;
     if (liveTranscribingRef.current) {
       if (finalPass && liveTranscriptionPromiseRef.current) {
         await liveTranscriptionPromiseRef.current;
@@ -124,7 +137,7 @@ export default function Recording() {
         : step
     )));
 
-    const promise = transcribeAudioBlob(blob, asrSession, {
+    const promise = transcribeAudioBlob(blob, session, {
       meetingTitle: title,
       allowEmpty: true,
       onProgress: finalPass ? (event) => setStatus(event.message) : undefined,
@@ -166,10 +179,9 @@ export default function Recording() {
   }
 
   async function startRecording() {
-    if (!asrSession) {
-      setStatus('ASR model is still loading');
-      return;
-    }
+    setStatus(asrSession ? 'ASR model ready' : 'Loading ASR model from browser cache');
+    const session = asrSession ?? await ensureAsrSession();
+    activeAsrSessionRef.current = session;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(stream);
@@ -251,6 +263,14 @@ export default function Recording() {
     const actionItems = [];
     const openQuestions = [];
 
+    setStatus('Loading extraction model from browser cache');
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'extract'
+        ? { ...step, status: 'active', detail: modelState.llm.status === 'ready' ? 'Extraction model ready' : 'Loading extraction model', progress: null }
+        : step
+    )));
+    await ensureLlmSession();
+
     for (const window of windows) {
       setStatus(`Extracting structured items ${window.index + 1}/${totalChunks}`);
       setProgressSteps((steps) => steps.map((step) => (
@@ -272,6 +292,10 @@ export default function Recording() {
     )));
 
     setStatus('Deduplicating structured items');
+    setProgressSteps((steps) => steps.map((step) => (
+      step.id === 'dedupe' ? { ...step, status: 'active', detail: 'Loading embedding model', progress: null } : step
+    )));
+    await ensureEmbeddingSession();
     setProgressSteps((steps) => steps.map((step) => (
       step.id === 'dedupe' ? { ...step, status: 'active', detail: 'Clustering duplicate items', progress: null } : step
     )));
@@ -357,17 +381,14 @@ export default function Recording() {
     let transcriptDetail = `${transcript.length} live transcript segments`;
 
     if (!editedText && duration >= 30 && transcriptEndSec < duration * 0.6) {
-      if (!asrSession) {
-        console.error('[Recording] asrSession is null. Boot gate should have prevented this');
-        return;
-      }
+      const session = activeAsrSessionRef.current ?? asrSession ?? await ensureAsrSession();
       setStatus('Live transcript coverage is incomplete. Recovering full transcript');
       setProgressSteps((steps) => steps.map((step) => (
         step.id === 'transcribe'
           ? { ...step, status: 'active', detail: 'Recovering full transcript', progress: 5 }
           : step
       )));
-      transcript = await transcribeAudioBlob(blob, asrSession, {
+      transcript = await transcribeAudioBlob(blob, session, {
         meetingTitle: title,
         fallbackText: liveText,
         onProgress: (event) => {
@@ -394,12 +415,11 @@ export default function Recording() {
 
   async function importAudioFile(file: File | null) {
     if (!file || state !== 'idle') return;
-    if (!asrSession) {
-      setStatus('ASR model is still loading');
-      return;
-    }
 
     setState('processing');
+    setStatus(asrSession ? `Transcribing ${file.name}` : 'Loading ASR model from browser cache');
+    const session = asrSession ?? await ensureAsrSession();
+    activeAsrSessionRef.current = session;
     const nextTitle = title.trim() && title !== 'Untitled meeting'
       ? title
       : file.name.replace(/\.[^.]+$/, '') || 'Imported meeting';
@@ -413,7 +433,7 @@ export default function Recording() {
     ]);
 
     const startedAt = Date.now();
-    const transcript = await transcribeAudioBlob(file, asrSession, {
+    const transcript = await transcribeAudioBlob(file, session, {
       meetingTitle: nextTitle,
       onProgress: (event) => {
         setStatus(event.message);
@@ -466,6 +486,7 @@ export default function Recording() {
             <span className="field-label">Meeting title</span>
             <input value={title} onChange={(event) => setTitle(event.target.value)} disabled={state !== 'idle'} />
           </label>
+          <p className="model-inline-status">{asrModelStatus}</p>
 
           <Waveform analyser={analyser} />
 

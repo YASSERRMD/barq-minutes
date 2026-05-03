@@ -108,6 +108,46 @@ button {
   padding: 36px clamp(20px, 4vw, 56px);
 }
 
+.app-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(280px, 1.1fr);
+  gap: 24px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 28px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.app-banner-copy {
+  padding: clamp(22px, 4vw, 38px);
+}
+
+.app-banner h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 5vw, 4.8rem);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.app-banner p:last-child {
+  max-width: 520px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.app-banner img {
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  object-fit: cover;
+  object-position: center;
+  border-left: 1px solid var(--border);
+}
+
 .page-header {
   display: flex;
   align-items: flex-start;
@@ -308,6 +348,12 @@ button {
   color: var(--muted);
   font-size: 0.88rem;
   font-weight: 700;
+}
+
+.model-inline-status {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .waveform {
@@ -617,6 +663,16 @@ button {
 }
 
 @media (max-width: 980px) {
+  .app-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .app-banner img {
+    min-height: 220px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
   .record-layout {
     grid-template-columns: 1fr;
   }
