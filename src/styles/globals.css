@@ -614,9 +614,73 @@ button {
   padding-top: 14px;
 }
 
-.ask-result > p {
+.markdown-output {
   margin: 0 0 12px;
   line-height: 1.6;
+}
+
+.markdown-output > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-output > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-output p,
+.markdown-output ul,
+.markdown-output ol {
+  margin: 0 0 12px;
+}
+
+.markdown-output ul,
+.markdown-output ol {
+  padding-left: 22px;
+}
+
+.markdown-output li + li {
+  margin-top: 6px;
+}
+
+.markdown-output h3,
+.markdown-output h4,
+.markdown-output h5 {
+  margin: 14px 0 8px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.markdown-output code {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  background: var(--surface-2);
+  font-size: 0.92em;
+}
+
+.markdown-output a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.thinking-disclosure {
+  margin: 0 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+
+.thinking-disclosure summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.thinking-output {
+  margin-top: 10px;
+  color: var(--muted);
 }
 
 .source-grid {
