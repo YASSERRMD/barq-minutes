@@ -51,7 +51,8 @@ export async function askMeeting(meetingId: string, question: string): Promise<A
       role: 'system',
       content: `Answer questions about one meeting using only the retrieved transcript chunks.
 If the chunks do not contain the answer, say that the meeting transcript does not show it.
-Keep the answer concise and cite chunk numbers in square brackets.`,
+Keep the answer concise and cite chunk numbers in square brackets.
+Do not include thinking, hidden reasoning, or <think> tags.`,
     },
     {
       role: 'user',
