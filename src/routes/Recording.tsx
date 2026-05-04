@@ -354,7 +354,7 @@ export default function Recording() {
 
     setStatus('Generating summary');
     setProgressSteps((steps) => steps.map((step) => (
-      step.id === 'summary' ? { ...step, status: 'active', detail: 'Summarizing transcript chunks', progress: null } : step
+      step.id === 'summary' ? { ...step, status: 'active', detail: 'Building complete meeting summary from transcript chunks', progress: null } : step
     )));
     const summary = await generateFinalSummary({
       transcript,
