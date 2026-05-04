@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:huggingface": "tsc -b && vite build --outDir publish/huggingface",
+    "build:github-pages": "tsc -b && VITE_BASE_PATH=/barq-minutes/ vite build --outDir publish/github-pages",
     "preview": "vite preview"
   },
   "dependencies": {
