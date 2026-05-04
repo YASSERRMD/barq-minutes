@@ -5,10 +5,12 @@ import { estimateTokens } from '../utils/tokens';
 import { chunkTranscriptForExtraction, type TranscriptWindow } from './chunker';
 
 const SUMMARY_CONTEXT_TOKEN_LIMIT = 2800;
-const CHUNK_SUMMARY_MAX_NEW_TOKENS = 384;
-const COMPLETE_SUMMARY_MAX_NEW_TOKENS = 768;
-const CompleteSummarySchema = z.array(z.string().min(1)).min(3).max(12);
-const ChunkSummarySchema = z.array(z.string().min(1)).min(3).max(8);
+const CHUNK_SUMMARY_MAX_NEW_TOKENS = 256;
+const COMPLETE_SUMMARY_MAX_NEW_TOKENS = 384;
+const SUMMARY_MAX_ITEMS = 6;
+const SUMMARY_MAX_CHARS = 160;
+const CompleteSummarySchema = z.array(z.string().min(1)).min(1).max(20);
+const ChunkSummarySchema = z.array(z.string().min(1)).min(1).max(20);
 
 export type SummaryProgress = (event: {
   step: 'chunk_summary' | 'merge_summary' | 'final_summary';
@@ -28,10 +30,91 @@ function extractJsonArray(text: string): unknown {
   return JSON.parse(candidate.slice(start, end + 1));
 }
 
+function extractSummaryArray(text: string): string[] {
+  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  try {
+    const parsed = extractJsonArray(cleanText);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item).trim()).filter(Boolean);
+    }
+  } catch {
+    // Fall through to markdown and numbered list parsing.
+  }
+
+  const quotedItems = [...cleanText.matchAll(/"((?:\\.|[^"\\])*)"/g)]
+    .map((match) => {
+      try {
+        return JSON.parse(`"${match[1]}"`) as string;
+      } catch {
+        return match[1].replace(/\\"/g, '"');
+      }
+    })
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (quotedItems.length > 0) return quotedItems;
+
+  return cleanText
+    .split('\n')
+    .map((line) => line
+      .replace(/^\s*(?:[-*]|\d+\.)\s+/, '')
+      .replace(/^[\s"',]+|[\s"',]+$/g, '')
+      .replace(/\\"/g, '"')
+      .trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !/^```/.test(line))
+    .filter((line) => !/^[\[\],]+$/.test(line))
+    .slice(0, 12);
+}
+
 function trimText(text: string, maxChars: number) {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (clean.length <= maxChars) return clean;
   return `${clean.slice(0, Math.max(0, maxChars - 3)).trim()}...`;
+}
+
+function compactSummaryItems(items: string[], maxItems = SUMMARY_MAX_ITEMS, maxChars = SUMMARY_MAX_CHARS) {
+  return items
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((item) => !/^\[?\d+s\s*-\s*\d+s\]?\.?$/i.test(item))
+    .filter((item) => !/^chunk\s+\d+\b/i.test(item))
+    .filter((item) => !/^transcript section\s+\d+\b/i.test(item))
+    .filter((item) => !/^merged group\s+\d+\b/i.test(item))
+    .filter((item) => !/^[\[\],]+$/.test(item))
+    .filter((item) => !/unfinished conversation/i.test(item))
+    .filter((item) => !/^here (?:is|are)\b/i.test(item))
+    .filter((item) => !/^summary\b/i.test(item))
+    .slice(0, maxItems)
+    .map((item) => trimText(item, maxChars));
+}
+
+function transcriptText(transcript: TranscriptTurn[]) {
+  return transcript
+    .map((turn) => turn.text)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitSentences(text: string) {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
+}
+
+function sentenceGroups(sentences: string[]) {
+  if (sentences.length === 0) return [];
+  const targetGroups = Math.min(SUMMARY_MAX_ITEMS, Math.max(1, Math.ceil(sentences.length / 10)));
+  const groupSize = Math.max(1, Math.ceil(sentences.length / targetGroups));
+  const groups: string[] = [];
+
+  for (let index = 0; index < sentences.length; index += groupSize) {
+    groups.push(sentences.slice(index, index + groupSize).join(' '));
+  }
+
+  return groups.slice(0, 12);
 }
 
 export function buildFallbackSummary(input: {
@@ -40,32 +123,52 @@ export function buildFallbackSummary(input: {
   actionItems: ActionItem[];
   openQuestions: OpenQuestion[];
 }) {
-  const windows = chunkTranscriptForExtraction(input.transcript, 3200, 0);
-  const duration = input.transcript.length > 0
-    ? Math.round(Math.max(...input.transcript.map((turn) => turn.endSec)))
-    : 0;
-
-  const discussionPoints = windows
-    .slice(0, 10)
-    .map((window) => {
-      const text = window.text.replace(/\[turn\s+\d+\s+\|\s+\d+s-\d+s\]\s+/g, '');
-      return `${Math.round(window.startSec)}s to ${Math.round(window.endSec)}s: ${trimText(text, 260)}`;
-    })
-    .filter(Boolean);
+  const text = transcriptText(input.transcript);
+  const pointLimit = text.length < 500 ? 1 : text.length < 1600 ? 3 : SUMMARY_MAX_ITEMS;
+  const discussionPoints = compactSummaryItems(sentenceGroups(splitSentences(text)), pointLimit, SUMMARY_MAX_CHARS);
 
   if (discussionPoints.length === 0) {
     return ['The meeting transcript was captured but did not contain enough text for a detailed summary.'];
   }
 
-  return [
-    duration > 0 ? `The meeting covered approximately ${Math.ceil(duration / 60)} minutes of discussion.` : 'The meeting transcript was processed locally.',
-    ...discussionPoints,
-  ].slice(0, 12);
+  return discussionPoints;
+}
+
+export function isLegacyFallbackSummary(summary: string[]) {
+  const text = summary.join('\n').toLowerCase();
+  return summary.some((item) => item.length > 360)
+    || summary.some((item) => item.trim().endsWith('...'))
+    || summary.some((item) => /^[\[\],]+$/.test(item.trim()))
+    || summary.some((item) => /\\"/.test(item))
+    || summary.some((item) => /unfinished conversation/i.test(item))
+    || summary.some((item) => /^\d+s to \d+s:/i.test(item.trim()))
+    || summary.some((item) => /^\[?\d+s\s*-\s*\d+s\]?\.?$/i.test(item.trim()))
+    || text.includes('decisions were extracted from the transcript')
+    || text.includes('action items were extracted from the transcript')
+    || text.includes('open questions were extracted from the transcript')
+    || text.includes('review the structured sections')
+    || text.includes('meeting summary could not be generated')
+    || text.includes('the meeting covered:')
+    || text.includes('the transcript covers approximately');
+}
+
+export function displaySummary(input: {
+  transcript: TranscriptTurn[];
+  decisions: Decision[];
+  actionItems: ActionItem[];
+  openQuestions: OpenQuestion[];
+  summary: string[];
+}) {
+  if (input.summary.length > 0 && !isLegacyFallbackSummary(input.summary)) {
+    return input.summary;
+  }
+
+  return buildFallbackSummary(input);
 }
 
 function summaryLine(window: TranscriptWindow, bullets: string[]) {
   return [
-    `Chunk ${window.index + 1} (${Math.round(window.startSec)}s-${Math.round(window.endSec)}s):`,
+    `Transcript section ${window.index + 1}:`,
     ...bullets.map((bullet) => `- ${bullet}`),
   ].join('\n');
 }
@@ -101,9 +204,9 @@ async function summarizeWindow(
     },
     {
       role: 'user',
-      content: `Return a JSON array of 3 to 8 detailed points that summarize what is discussed in this transcript window.
-Capture every meaningful topic, explanation, concern, option, decision, follow-up, and context from this window.
-Write each point as a complete sentence with concrete detail.
+      content: `Return a JSON array of 1 to 4 concise points that summarize what is discussed in this transcript window.
+Capture the meaningful topics, explanations, concerns, options, decisions, follow-ups, and context from this window.
+Write each point as one clear sentence under ${SUMMARY_MAX_CHARS} characters.
 Do not mention that this is a window or chunk.
 
 ${window.text}`,
@@ -113,7 +216,7 @@ ${window.text}`,
     temperature: 0.2,
   });
 
-  return ChunkSummarySchema.parse(extractJsonArray(output));
+  return compactSummaryItems(ChunkSummarySchema.parse(extractSummaryArray(output)), 4);
 }
 
 async function mergeSummaryGroups(
@@ -155,10 +258,10 @@ async function mergeSummaryGroups(
       },
       {
         role: 'user',
-        content: `Merge these transcript summary notes into 6 to 12 detailed chronological points.
+        content: `Merge these transcript summary notes into 3 to ${SUMMARY_MAX_ITEMS} concise chronological points.
 Return strict JSON only as an array of strings.
-Preserve all meaningful discussion points. Do not collapse unrelated topics into one vague bullet.
-Write each point as a complete sentence about what was discussed.
+Preserve the important discussion points while combining related details.
+Write each point as one clear sentence under ${SUMMARY_MAX_CHARS} characters.
 
 ${groups[index].join('\n\n')}`,
       },
@@ -167,7 +270,7 @@ ${groups[index].join('\n\n')}`,
       temperature: 0.2,
     });
 
-    const bullets = CompleteSummarySchema.parse(extractJsonArray(output));
+    const bullets = compactSummaryItems(CompleteSummarySchema.parse(extractSummaryArray(output)));
     merged.push(`Merged group ${index + 1}:\n${bullets.map((bullet) => `- ${bullet}`).join('\n')}`);
   }
 
@@ -180,6 +283,7 @@ export async function generateFinalSummary(input: {
   actionItems: ActionItem[];
   openQuestions: OpenQuestion[];
   onProgress?: SummaryProgress;
+  fallbackOnError?: boolean;
 }): Promise<string[]> {
   try {
     const llm = await loadLlmSession();
@@ -205,13 +309,14 @@ export async function generateFinalSummary(input: {
       message: 'Generating final whole transcript summary',
     });
 
-    const prompt = `Create a complete meeting summary from transcript summaries that cover every part of the meeting.
-Return strict JSON only as an array of 6 to 12 strings.
-Each string must be a detailed summary point without markdown syntax.
+    const prompt = `Create a concise meeting summary from transcript summaries that cover every part of the meeting.
+Return strict JSON only as an array of 3 to ${SUMMARY_MAX_ITEMS} strings.
+Each string must be one clear summary point without markdown syntax.
 Cover what was discussed across the whole transcript in chronological order.
 Include the main topics, context, explanations, concerns, options, decisions, and follow-ups.
 Do not summarize only extracted decisions, action items, or questions.
 Do not write generic counts or say that sections were extracted.
+Keep each string under ${SUMMARY_MAX_CHARS} characters.
 
 ${context}`;
 
@@ -226,9 +331,10 @@ ${context}`;
       temperature: 0.2,
     });
 
-    return CompleteSummarySchema.parse(extractJsonArray(output));
+    return compactSummaryItems(CompleteSummarySchema.parse(extractSummaryArray(output)));
   } catch (error) {
     console.warn('[summarize] Summary generation failed', error);
+    if (input.fallbackOnError === false) throw error;
     return buildFallbackSummary(input);
   }
 }

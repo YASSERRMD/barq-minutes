@@ -4,9 +4,9 @@ import { ArrowLeft, Calendar, Clock } from 'lucide-react';
 import AskBox from '../components/AskBox';
 import ExportButtons from '../components/ExportButtons';
 import TranscriptViewer from '../components/TranscriptViewer';
-import { buildFallbackSummary } from '../pipeline/summarize';
+import { displaySummary, generateFinalSummary, isLegacyFallbackSummary } from '../pipeline/summarize';
 import type { Meeting as MeetingRecord } from '../schemas/meeting';
-import { getMeeting } from '../storage/meetings';
+import { getMeeting, saveMeeting } from '../storage/meetings';
 import { formatClock, formatDateTime } from '../utils/time';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -22,6 +22,7 @@ export default function Meeting() {
   const { id } = useParams();
   const [meeting, setMeeting] = useState<MeetingRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [summaryStatus, setSummaryStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -37,6 +38,41 @@ export default function Meeting() {
       mounted = false;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!meeting || meeting.transcript.length === 0) return;
+    if (meeting.summary.length > 0 && !isLegacyFallbackSummary(meeting.summary)) return;
+
+    let cancelled = false;
+    setSummaryStatus('Regenerating complete summary from the transcript');
+
+    generateFinalSummary({
+      transcript: meeting.transcript,
+      decisions: meeting.decisions,
+      actionItems: meeting.actionItems,
+      openQuestions: meeting.openQuestions,
+      fallbackOnError: false,
+      onProgress: (event) => {
+        if (!cancelled) setSummaryStatus(event.message);
+      },
+    })
+      .then(async (summary) => {
+        if (cancelled) return;
+        const updated = await saveMeeting({ ...meeting, summary });
+        if (!cancelled) {
+          setMeeting(updated);
+          setSummaryStatus(null);
+        }
+      })
+      .catch((error) => {
+        console.warn('[Meeting] Summary regeneration failed', error);
+        if (!cancelled) setSummaryStatus(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting]);
 
   if (isLoading) return <div className="empty-state">Loading meeting</div>;
 
@@ -54,7 +90,7 @@ export default function Meeting() {
     );
   }
 
-  const summary = meeting.summary.length > 0 ? meeting.summary : buildFallbackSummary(meeting);
+  const summary = displaySummary(meeting);
 
   return (
     <section>
@@ -85,6 +121,7 @@ export default function Meeting() {
         </Section>
 
         <Section title="Complete Summary">
+          {summaryStatus ? <p className="status-line">{summaryStatus}</p> : null}
           <ul className="summary-list">
             {summary.map((item, index) => (
               <li key={index}>{item}</li>
@@ -97,7 +134,7 @@ export default function Meeting() {
             {meeting.decisions.map((item, index) => (
               <article key={index} className="structured-item">
                 <p>{item.text}</p>
-                <span>{formatClock(item.timestampSec)} {item.speaker ? `by ${item.speaker}` : ''}</span>
+                {item.speaker ? <span>By {item.speaker}</span> : null}
               </article>
             ))}
             {meeting.decisions.length === 0 ? <p className="muted">No decisions extracted</p> : null}
@@ -109,11 +146,13 @@ export default function Meeting() {
             {meeting.actionItems.map((item, index) => (
               <article key={index} className="structured-item">
                 <p>{item.text}</p>
-                <span>
-                  {formatClock(item.timestampSec)}
-                  {item.owner ? ` for ${item.owner}` : ''}
-                  {item.dueDate ? ` due ${item.dueDate}` : ''}
-                </span>
+                {item.owner || item.dueDate ? (
+                  <span>
+                    {item.owner ? `For ${item.owner}` : ''}
+                    {item.owner && item.dueDate ? ' ' : ''}
+                    {item.dueDate ? `Due ${item.dueDate}` : ''}
+                  </span>
+                ) : null}
               </article>
             ))}
             {meeting.actionItems.length === 0 ? <p className="muted">No action items extracted</p> : null}
@@ -125,7 +164,7 @@ export default function Meeting() {
             {meeting.openQuestions.map((item, index) => (
               <article key={index} className="structured-item">
                 <p>{item.text}</p>
-                <span>{formatClock(item.timestampSec)} {item.raisedBy ? `raised by ${item.raisedBy}` : ''}</span>
+                {item.raisedBy ? <span>Raised by {item.raisedBy}</span> : null}
               </article>
             ))}
             {meeting.openQuestions.length === 0 ? <p className="muted">No open questions extracted</p> : null}

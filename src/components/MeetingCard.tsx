@@ -1,9 +1,12 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Clock, Users } from 'lucide-react';
+import { displaySummary } from '../pipeline/summarize';
 import type { Meeting } from '../schemas/meeting';
 import { formatClock, formatDateTime } from '../utils/time';
 
 export default function MeetingCard({ meeting }: { meeting: Meeting }) {
+  const summary = displaySummary(meeting);
+
   return (
     <article className="meeting-card card">
       <div>
@@ -21,7 +24,7 @@ export default function MeetingCard({ meeting }: { meeting: Meeting }) {
         </span>
       </div>
       <p className="meeting-card-summary">
-        {meeting.summary[0] ?? `${meeting.transcript.length} transcript turns captured`}
+        {summary[0] ?? `${meeting.transcript.length} transcript turns captured`}
       </p>
       <div className="meeting-card-counts">
         <span>{meeting.decisions.length} decisions</span>
