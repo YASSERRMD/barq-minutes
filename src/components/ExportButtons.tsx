@@ -13,7 +13,7 @@ function markdown(meeting: Meeting) {
     `Started: ${formatDateTime(meeting.startedAt)}`,
     `Duration: ${formatClock(meeting.durationSec)}`,
     '',
-    '## Summary',
+    '## Complete Summary',
     ...summary.map((item) => `- ${item}`),
     '',
     '## Decisions',
@@ -54,7 +54,7 @@ function exportNode(meeting: Meeting) {
   node.innerHTML = `
     <h1>${meeting.title}</h1>
     <p>${formatDateTime(meeting.startedAt)} | ${formatClock(meeting.durationSec)}</p>
-    <h2>Summary</h2>
+    <h2>Complete Summary</h2>
     <ul>${summary.map((item) => `<li>${item}</li>`).join('')}</ul>
     <h2>Decisions</h2>
     <ul>${meeting.decisions.map((item) => `<li>${item.text}</li>`).join('')}</ul>

@@ -124,10 +124,10 @@ The LLM context window is 4096 tokens, so the full transcript is never sent to t
 
 ### Layer 3: Final Summary
 
-- The final summary call receives only deduped structured items and a compact list of timestamped speaker turns.
-- The compact view is capped under about 1500 tokens.
-- If speaker turns do not fit, the summary uses only structured items.
-- The result is exactly five executive summary bullets.
+- Every transcript extraction window is summarized first, so the whole transcript is covered without sending it to the LLM in one call.
+- Long meetings use recursive summary merging to stay under the local context limit.
+- The final summary is generated from transcript chunk summaries, not from extracted decisions or action items.
+- The result is a detailed complete meeting summary with 6 to 12 chronological points when enough transcript content is available.
 
 ### Layer 4: Meeting Q&A
 
