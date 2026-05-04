@@ -1,12 +1,12 @@
 import { Download, FileText } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
-import { buildFallbackSummary } from '../pipeline/summarize';
+import { displaySummary } from '../pipeline/summarize';
 import type { Meeting } from '../schemas/meeting';
 import { formatClock, formatDateTime } from '../utils/time';
 
 function markdown(meeting: Meeting) {
-  const summary = meeting.summary.length > 0 ? meeting.summary : buildFallbackSummary(meeting);
+  const summary = displaySummary(meeting);
   const lines = [
     `# ${meeting.title}`,
     '',
@@ -17,13 +17,13 @@ function markdown(meeting: Meeting) {
     ...summary.map((item) => `- ${item}`),
     '',
     '## Decisions',
-    ...meeting.decisions.map((item) => `- ${formatClock(item.timestampSec)} ${item.text}`),
+    ...meeting.decisions.map((item) => `- ${item.text}${item.speaker ? ` By: ${item.speaker}` : ''}`),
     '',
     '## Action Items',
-    ...meeting.actionItems.map((item) => `- ${formatClock(item.timestampSec)} ${item.text}${item.owner ? ` Owner: ${item.owner}` : ''}${item.dueDate ? ` Due: ${item.dueDate}` : ''}`),
+    ...meeting.actionItems.map((item) => `- ${item.text}${item.owner ? ` Owner: ${item.owner}` : ''}${item.dueDate ? ` Due: ${item.dueDate}` : ''}`),
     '',
     '## Open Questions',
-    ...meeting.openQuestions.map((item) => `- ${formatClock(item.timestampSec)} ${item.text}`),
+    ...meeting.openQuestions.map((item) => `- ${item.text}${item.raisedBy ? ` Raised by: ${item.raisedBy}` : ''}`),
     '',
     '## Transcript',
     ...meeting.transcript.map((turn) => `- ${formatClock(turn.startSec)} ${turn.speaker}: ${turn.text}`),
@@ -41,7 +41,7 @@ function downloadText(filename: string, content: string) {
 }
 
 function exportNode(meeting: Meeting) {
-  const summary = meeting.summary.length > 0 ? meeting.summary : buildFallbackSummary(meeting);
+  const summary = displaySummary(meeting);
   const node = document.createElement('div');
   node.style.position = 'fixed';
   node.style.left = '-10000px';
