@@ -354,9 +354,27 @@ export default function Recording() {
 
     setStatus('Generating summary');
     setProgressSteps((steps) => steps.map((step) => (
-      step.id === 'summary' ? { ...step, status: 'active', detail: 'Creating 5 executive bullets', progress: null } : step
+      step.id === 'summary' ? { ...step, status: 'active', detail: 'Summarizing transcript chunks', progress: null } : step
     )));
-    const summary = await generateFinalSummary({ transcript, ...deduped });
+    const summary = await generateFinalSummary({
+      transcript,
+      ...deduped,
+      onProgress: (event) => {
+        setStatus(event.message);
+        setProgressSteps((steps) => steps.map((step) => (
+          step.id === 'summary'
+            ? {
+                ...step,
+                status: 'active',
+                detail: event.message,
+                progress: event.totalChunks > 0
+                  ? Math.min(95, ((event.chunkIndex + 1) / event.totalChunks) * 100)
+                  : null,
+              }
+            : step
+        )));
+      },
+    });
     setProgressSteps((steps) => steps.map((step) => (
       step.id === 'summary' ? { ...step, status: 'done', detail: 'Done', progress: 100 } : step
     )));

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Send, Search } from 'lucide-react';
 import { askMeeting, type AskMeetingResult } from '../pipeline/askMeeting';
+import { markdownToHtml, splitModelThinking } from '../utils/markdown';
 import { formatClock } from '../utils/time';
 
 export default function AskBox({ meetingId }: { meetingId: string }) {
@@ -25,6 +26,8 @@ export default function AskBox({ meetingId }: { meetingId: string }) {
     }
   }
 
+  const rendered = result ? splitModelThinking(result.answer) : null;
+
   return (
     <div className="ask-box">
       <form className="ask-form" onSubmit={submit}>
@@ -42,9 +45,21 @@ export default function AskBox({ meetingId }: { meetingId: string }) {
 
       {isAsking ? <p className="status-line">Retrieving local chunks and loading the LLM</p> : null}
       {error ? <p className="status-line">{error}</p> : null}
-      {result ? (
+      {result && rendered ? (
         <div className="ask-result">
-          <p>{result.answer}</p>
+          <div
+            className="markdown-output"
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(rendered.answer) }}
+          />
+          {rendered.thinking ? (
+            <details className="thinking-disclosure">
+              <summary>Model thinking</summary>
+              <div
+                className="markdown-output thinking-output"
+                dangerouslySetInnerHTML={{ __html: markdownToHtml(rendered.thinking) }}
+              />
+            </details>
+          ) : null}
           <div className="source-grid">
             {result.chunks.map((chunk, index) => (
               <article key={chunk.id} className="source-card">

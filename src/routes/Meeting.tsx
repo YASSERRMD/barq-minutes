@@ -84,7 +84,7 @@ export default function Meeting() {
           <AskBox meetingId={meeting.id} />
         </Section>
 
-        <Section title="Executive Summary">
+        <Section title="Summary">
           <ul className="summary-list">
             {summary.map((item, index) => (
               <li key={index}>{item}</li>
